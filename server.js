@@ -1,0 +1,112 @@
+﻿import express from 'express';
+import cors from 'cors';
+import { initializeDatabase } from './database.js';
+import classesRouter from './routes/classes.js';
+import attendanceRouter from './routes/attendance.js';
+import exportRouter from './routes/export.js';
+import studentsRouter from './routes/students.js';
+
+// Khá»Ÿi táº¡o Express app
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Khá»Ÿi táº¡o database
+initializeDatabase();
+
+// Middleware
+const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, Postman, etc.)
+        if (!origin) return callback(null, true);
+        
+        if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true
+}));
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Logging middleware
+app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+    next();
+});
+
+// Routes
+app.use('/api/classes', classesRouter);
+app.use('/api/attendance', attendanceRouter);
+app.use('/api/export', exportRouter);
+app.use('/api/students', studentsRouter);
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    res.json({
+        success: true,
+        message: 'Server Ä‘ang hoáº¡t Ä‘á»™ng',
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+    res.json({
+        success: true,
+        message: 'API Há»‡ thá»‘ng Äiá»ƒm Danh Thiáº¿u Nhi GiÃ¡o LÃ½',
+        version: '1.0.0',
+        endpoints: {
+            classes: '/api/classes',
+            attendance: '/api/attendance',
+            export: '/api/export',
+            health: '/api/health'
+        }
+    });
+});
+
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        error: 'Endpoint khÃ´ng tá»“n táº¡i'
+    });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+    console.error('Error:', err);
+    res.status(500).json({
+        success: false,
+        error: 'Lá»—i server',
+        message: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+});
+
+// Start server
+app.listen(PORT, () => {
+    console.log('='.repeat(50));
+    console.log('ðŸš€ Server Ä‘ang cháº¡y táº¡i:');
+    console.log(`   http://localhost:${PORT}`);
+    console.log('='.repeat(50));
+    console.log('ðŸ“š API Endpoints:');
+    console.log(`   GET    /api/health`);
+    console.log(`   GET    /api/classes`);
+    console.log(`   POST   /api/classes/upload`);
+    console.log(`   GET    /api/classes/:classId/students`);
+    console.log(`   POST   /api/attendance`);
+    console.log(`   GET    /api/attendance/history`);
+    console.log(`   GET    /api/attendance/session/:sessionId`);
+    console.log(`   GET    /api/export/class/:classId`);
+    console.log('='.repeat(50));
+});
+
+export default app;
