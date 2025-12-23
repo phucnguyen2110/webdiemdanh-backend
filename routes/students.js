@@ -17,7 +17,7 @@ router.get('/:studentId/qr', async (req, res) => {
         if (!student) {
             return res.status(404).json({
                 success: false,
-                error: 'KhÃ´ng tÃ¬m tháº¥y thiáº¿u nhi'
+                error: 'Khong tim thay thieu nhi'
             });
         }
 
@@ -48,7 +48,7 @@ router.get('/:studentId/qr', async (req, res) => {
         console.error('Error generating QR code:', error);
         res.status(500).json({
             success: false,
-            error: 'Lá»—i khi táº¡o mÃ£ QR'
+            error: 'Loi khi tao ma QR'
         });
     }
 });
@@ -67,7 +67,7 @@ router.get('/class/:classId/qr-all', async (req, res) => {
         if (!students || students.length === 0) {
             return res.status(404).json({
                 success: false,
-                error: 'KhÃ´ng cÃ³ thiáº¿u nhi trong lá»›p'
+                error: 'Khong co thieu nhi trong lop'
             });
         }
 
@@ -104,7 +104,7 @@ router.get('/class/:classId/qr-all', async (req, res) => {
         console.error('Error generating QR codes:', error);
         res.status(500).json({
             success: false,
-            error: 'Lá»—i khi táº¡o mÃ£ QR'
+            error: 'Loi khi tao ma QR'
         });
     }
 });

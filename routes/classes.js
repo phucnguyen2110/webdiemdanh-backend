@@ -1,10 +1,12 @@
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
+import fs, { existsSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { classesDB, studentsDB } from '../database.js';
 import { readExcelFile } from '../utils/excelReader.js';
+import XLSX from 'xlsx';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -57,13 +59,41 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         if (!students || students.length === 0) {
             return res.status(400).json({ success: false, error: 'No students found in Excel file' });
         }
-        const classId = await classesDB.create(className.trim(), req.file.path, req.file.originalname);
-        for (const student of students) {
-            await studentsDB.create(classId, student);
+
+        // Check if class already exists
+        const existingClasses = await classesDB.getAll();
+        const existingClass = existingClasses.find(c => c.name === className.trim());
+
+        let classId;
+        if (existingClass) {
+            // Class exists - delete old students and old file
+            classId = existingClass.id;
+            await studentsDB.deleteByClassId(classId);
+
+            // Delete old Excel file if exists
+            const oldClass = await classesDB.getById(classId);
+            if (oldClass && oldClass.excel_file_path && existsSync(oldClass.excel_file_path)) {
+                try {
+                    unlinkSync(oldClass.excel_file_path);
+                    console.log('Deleted old Excel file:', oldClass.excel_file_path);
+                } catch (err) {
+                    console.error('Error deleting old file:', err);
+                }
+            }
+
+            // Update excel file path
+            await classesDB.update(classId, className.trim());
+        } else {
+            // Create new class
+            classId = await classesDB.create(className.trim(), req.file.path, req.file.originalname);
         }
+
+        // Insert all students at once using bulk insert
+        await studentsDB.createBulk(classId, students);
+
         res.json({
             success: true,
-            message: 'Class created successfully',
+            message: existingClass ? 'Class updated successfully' : 'Class created successfully',
             classId: classId,
             className: className.trim(),
             studentsCount: students.length
@@ -88,11 +118,25 @@ router.get('/:classId/students', async (req, res) => {
 router.put('/:classId', async (req, res) => {
     try {
         const { classId } = req.params;
-        const { name } = req.body;
-        if (!name || !name.trim()) {
+        const { name, className } = req.body;
+        const newName = name || className; // Accept both 'name' and 'className'
+
+        if (!newName || !newName.trim()) {
             return res.status(400).json({ success: false, error: 'Class name is required' });
         }
-        await classesDB.update(classId, name.trim());
+
+        // Check if class name already exists (for a different class)
+        const existingClasses = await classesDB.getAll();
+        const duplicate = existingClasses.find(c => c.name === newName.trim() && c.id != classId);
+
+        if (duplicate) {
+            return res.status(400).json({
+                success: false,
+                error: `Tên lớp "${newName.trim()}" đã tồn tại. Vui lòng chọn tên khác.`
+            });
+        }
+
+        await classesDB.update(classId, newName.trim());
         res.json({ success: true, message: 'Class updated successfully' });
     } catch (error) {
         console.error('Error updating class:', error);
@@ -103,11 +147,101 @@ router.put('/:classId', async (req, res) => {
 router.delete('/:classId', async (req, res) => {
     try {
         const { classId } = req.params;
+
+        // Get class info to find Excel file path
+        const classInfo = await classesDB.getById(classId);
+
+        // Delete Excel file if exists
+        if (classInfo && classInfo.excel_file_path && existsSync(classInfo.excel_file_path)) {
+            try {
+                unlinkSync(classInfo.excel_file_path);
+                console.log('Deleted Excel file:', classInfo.excel_file_path);
+            } catch (err) {
+                console.error('Error deleting file:', err);
+            }
+        }
+
+        // Delete class from database
         await classesDB.delete(classId);
         res.json({ success: true, message: 'Class deleted successfully' });
     } catch (error) {
         console.error('Error deleting class:', error);
         res.status(500).json({ success: false, error: 'Failed to delete class' });
+    }
+});
+
+// Get Excel file content
+router.get('/:classId/excel', async (req, res) => {
+    try {
+        const { classId } = req.params;
+
+        // Get class info to find Excel file path
+        const classInfo = await classesDB.getById(classId);
+        if (!classInfo) {
+            return res.status(404).json({ success: false, error: 'Class not found' });
+        }
+
+        if (!classInfo.excel_file_path) {
+            return res.status(404).json({ success: false, error: 'No Excel file associated with this class' });
+        }
+
+        // Check if file exists
+        if (!fs.existsSync(classInfo.excel_file_path)) {
+            return res.status(404).json({ success: false, error: 'Excel file not found on server' });
+        }
+
+        // Read Excel file
+        const workbook = XLSX.readFile(classInfo.excel_file_path);
+        const sheets = [];
+
+        for (const sheetName of workbook.SheetNames) {
+            const worksheet = workbook.Sheets[sheetName];
+
+            // Convert to JSON with header row
+            const rawData = XLSX.utils.sheet_to_json(worksheet, {
+                header: 1,  // Return as 2D array
+                defval: '',  // Default value for empty cells
+                raw: true   // Return raw values (Excel serial numbers for dates)
+            });
+
+            // Process data to convert Excel dates
+            const data = rawData.map(row =>
+                row.map(cell => {
+                    // Try to convert if it looks like an Excel date
+                    if (typeof cell === 'number' && cell > 40000 && cell < 60000) {
+                        try {
+                            const parsed = XLSX.SSF.parse_date_code(cell);
+                            if (parsed) {
+                                const day = String(parsed.d).padStart(2, '0');
+                                const month = String(parsed.m).padStart(2, '0');
+                                const year = parsed.y;
+                                return `${day}/${month}/${year}`;
+                            }
+                        } catch (e) {
+                            return cell;
+                        }
+                    }
+                    return cell;
+                })
+            );
+
+            sheets.push({
+                name: sheetName,
+                data: data,
+                rowCount: data.length,
+                colCount: data.length > 0 ? Math.max(...data.map(row => row.length)) : 0
+            });
+        }
+
+        res.json({
+            success: true,
+            fileName: path.basename(classInfo.excel_file_path),
+            sheets: sheets
+        });
+
+    } catch (error) {
+        console.error('Error reading Excel file:', error);
+        res.status(500).json({ success: false, error: 'Failed to read Excel file' });
     }
 });
 

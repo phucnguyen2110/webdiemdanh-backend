@@ -81,9 +81,29 @@ export function readExcelFile(filePath) {
             }
         }
 
-        const students = [];
-        // Start reading data from the row after header
+        // Find first data row (skip empty rows after header)
+        let firstDataRow = headerRow + 1;
         for (let row = headerRow + 1; row <= range.e.r; row++) {
+            let hasData = false;
+            for (let col = range.s.c; col <= range.e.c; col++) {
+                const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+                const cell = worksheet[cellAddress];
+                if (cell && cell.v !== undefined && cell.v !== null && cell.v !== '') {
+                    hasData = true;
+                    break;
+                }
+            }
+            if (hasData) {
+                firstDataRow = row;
+                break;
+            }
+        }
+
+        console.log('First data row:', firstDataRow);
+
+        const students = [];
+        // Start reading data from the first non-empty row after header
+        for (let row = firstDataRow; row <= range.e.r; row++) {
             const student = {
                 stt: null,
                 baptismalName: '',
@@ -96,6 +116,8 @@ export function readExcelFile(filePath) {
             };
 
             let hasData = false;
+            let nameCol3 = ''; // Column 3: Last name
+            let nameCol4 = ''; // Column 4: First name (no header)
 
             for (let col = range.s.c; col <= range.e.c; col++) {
                 const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
@@ -112,7 +134,11 @@ export function readExcelFile(filePath) {
                 } else if (header && (header.includes('tên thánh') || header.includes('ten thanh'))) {
                     student.baptismalName = value;
                 } else if (header && (header.includes('họ') || header.includes('tên') || header.includes('ho ten'))) {
-                    student.fullName = value;
+                    // Column 3: Last name part
+                    nameCol3 = value;
+                } else if (col === 4 && !header && value) {
+                    // Column 4: First name part (no header, right after name column)
+                    nameCol4 = value;
                 } else if (header && (header.includes('ngày sinh') || header.includes('ngay sinh') || header.includes('sinh'))) {
                     student.dateOfBirth = value;
                 } else if (header && (header.includes('cha') || header.includes('bố') || header.includes('bo'))) {
@@ -127,6 +153,9 @@ export function readExcelFile(filePath) {
                     student.note = value;
                 }
             }
+
+            // Merge name
+            student.fullName = [nameCol3, nameCol4].filter(Boolean).join(' ').trim();
 
             // Only add student if they have a name
             if (hasData && student.fullName) {

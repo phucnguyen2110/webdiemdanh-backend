@@ -38,13 +38,13 @@ const all = (sql, params = []) => {
 };
 
 /**
- * Khá»Ÿi táº¡o database schema
+ * Khoi tao database schema
  */
 export async function initializeDatabase() {
   // Enable foreign keys
   await run('PRAGMA foreign_keys = ON');
 
-  // Táº¡o báº£ng classes (lá»›p há»c)
+  // Tao bang classes (lop hoc)
   await run(`
     CREATE TABLE IF NOT EXISTS classes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,32 +54,40 @@ export async function initializeDatabase() {
     )
   `);
 
-  // Táº¡o báº£ng students (thiáº¿u nhi)
+  // Tao bang student (thieu nhi)
   await run(`
     CREATE TABLE IF NOT EXISTS students (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       class_id INTEGER NOT NULL,
-      stt INTEGER NOT NULL,
+      stt INTEGER,
+      student_id TEXT,
+      baptismal_name TEXT,
       full_name TEXT NOT NULL,
+      date_of_birth TEXT,
+      father_name TEXT,
+      mother_name TEXT,
+      address TEXT,
+      phone TEXT,
+      note TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE
     )
   `);
 
-  // Táº¡o báº£ng attendance_sessions (buá»•i Ä‘iá»ƒm danh)
+  // Tao bang attendance_sessions (buoi diem danh)
   await run(`
     CREATE TABLE IF NOT EXISTS attendance_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       class_id INTEGER NOT NULL,
       attendance_date DATE NOT NULL,
-      attendance_type TEXT NOT NULL CHECK(attendance_type IN ('Há»c GiÃ¡o LÃ½', 'Lá»… Thá»© 5', 'Lá»… ChÃºa Nháº­t')),
+      attendance_type TEXT NOT NULL CHECK(attendance_type IN ('Hoc Giao Ly', 'Le Thu 5', 'Le Chua Nhat')),
       attendance_method TEXT DEFAULT 'manual' CHECK(attendance_method IN ('manual', 'qr')),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE
     )
   `);
 
-  // Táº¡o báº£ng attendance_records (chi tiáº¿t Ä‘iá»ƒm danh)
+  // Tao bang attendance_records (chi tiet diem danh)
   await run(`
     CREATE TABLE IF NOT EXISTS attendance_records (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,7 +105,7 @@ export async function initializeDatabase() {
       ALTER TABLE attendance_sessions 
       ADD COLUMN attendance_method TEXT DEFAULT 'manual' CHECK(attendance_method IN ('manual', 'qr'))
     `);
-    console.log('âœ… Migration: Added attendance_method column');
+    console.log('✅ Migration: Added attendance_method column');
   } catch (err) {
     // Column already exists, ignore error
     if (!err.message.includes('duplicate column name')) {
@@ -105,7 +113,35 @@ export async function initializeDatabase() {
     }
   }
 
-  // Táº¡o indexes Ä‘á»ƒ tÄƒng tá»‘c query
+  // Migration: Add new student fields if they don't exist
+  const studentColumns = [
+    'student_id TEXT',
+    'baptismal_name TEXT',
+    'date_of_birth TEXT',
+    'father_name TEXT',
+    'mother_name TEXT',
+    'address TEXT',
+    'phone TEXT',
+    'note TEXT'
+  ];
+
+  for (const column of studentColumns) {
+    try {
+      const [columnName] = column.split(' ');
+      await run(`ALTER TABLE students ADD COLUMN ${column}`);
+      console.log(`✅ Migration: Added ${columnName} column to students`);
+    } catch (err) {
+      if (!err.message.includes('duplicate column name')) {
+        console.error('Migration warning:', err.message);
+      }
+    }
+  }
+
+  // Migration: Make stt nullable if needed
+  // SQLite doesn't support ALTER COLUMN, so we skip this
+
+
+  // Tao indexes de tang toc query
   await run('CREATE INDEX IF NOT EXISTS idx_students_class ON students(class_id)');
   await run('CREATE INDEX IF NOT EXISTS idx_attendance_sessions_class ON attendance_sessions(class_id)');
   await run('CREATE INDEX IF NOT EXISTS idx_attendance_sessions_date ON attendance_sessions(attendance_date)');
@@ -120,7 +156,7 @@ export async function initializeDatabase() {
 
 // Classes
 export const classesDB = {
-  // Táº¡o lá»›p má»›i
+  // Tao lop moi
   create: async (name, excelFilePath = null) => {
     const result = await run(
       'INSERT INTO classes (name, excel_file_path) VALUES (?, ?)',
@@ -129,7 +165,7 @@ export const classesDB = {
     return result.lastID;
   },
 
-  // Láº¥y táº¥t cáº£ lá»›p
+  // Lay tat ca lop
   getAll: async () => {
     const rows = await all(`
       SELECT 
@@ -145,17 +181,17 @@ export const classesDB = {
     return rows;
   },
 
-  // Láº¥y lá»›p theo ID
+  // Lay lop theo ID
   getById: async (id) => {
     return await get('SELECT * FROM classes WHERE id = ?', [id]);
   },
 
-  // Cáº­p nháº­t tÃªn lá»›p
+  // Cap nhat ten lop
   update: async (id, name) => {
     return await run('UPDATE classes SET name = ? WHERE id = ?', [name, id]);
   },
 
-  // XÃ³a lá»›p
+  // Xoa lop
   delete: async (id) => {
     return await run('DELETE FROM classes WHERE id = ?', [id]);
   }
@@ -163,14 +199,29 @@ export const classesDB = {
 
 // Students
 export const studentsDB = {
-  // Táº¡o nhiá»u há»c sinh cÃ¹ng lÃºc (bulk insert)
+  // Tao nhiu hoc sinh cung luc (bulk insert)
   createBulk: async (classId, students) => {
     await run('BEGIN TRANSACTION');
     try {
       for (const student of students) {
         await run(
-          'INSERT INTO students (class_id, stt, baptismal_name, full_name, date_of_birth) VALUES (?, ?, ?, ?, ?)',
-          [classId, student.stt, student.baptismalName, student.fullName, student.dateOfBirth]
+          `INSERT INTO students (
+            class_id, stt, student_id, baptismal_name, full_name, 
+            date_of_birth, father_name, mother_name, address, phone, note
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            classId,
+            student.stt || null,
+            student.studentId || null,
+            student.baptismalName || null,
+            student.fullName,
+            student.dateOfBirth || null,
+            student.fatherName || null,
+            student.motherName || null,
+            student.address || null,
+            student.phone || null,
+            student.note || null
+          ]
         );
       }
       await run('COMMIT');
@@ -180,17 +231,34 @@ export const studentsDB = {
     }
   },
 
-  // Láº¥y táº¥t cáº£ há»c sinh trong lá»›p
+  // Lay tat ca hoc sinh trong lop
   getByClassId: async (classId) => {
-    return await all(`
-      SELECT id, stt, baptismal_name as baptismalName, full_name as fullName, date_of_birth as dateOfBirth
+    const students = await all(`
+      SELECT 
+        id, 
+        stt, 
+        student_id as studentId,
+        baptismal_name as baptismalName, 
+        full_name as fullName, 
+        date_of_birth as dateOfBirth,
+        father_name as fatherName,
+        mother_name as motherName,
+        address,
+        phone,
+        note
       FROM students
       WHERE class_id = ?
       ORDER BY stt ASC
     `, [classId]);
+
+    // Add displayName field: "STT. BaptismalName FullName"
+    return students.map(student => ({
+      ...student,
+      displayName: `${student.stt || ''}${student.stt ? '. ' : ''}${student.baptismalName ? student.baptismalName + ' ' : ''}${student.fullName}`.trim()
+    }));
   },
 
-  // Láº¥y thÃ´ng tin má»™t há»c sinh
+  // Lay thong tin mot hoc sinh
   getById: async (studentId) => {
     return await get(`
       SELECT id, class_id as classId, stt, baptismal_name as baptismalName, full_name as fullName, date_of_birth as dateOfBirth
@@ -199,7 +267,7 @@ export const studentsDB = {
     `, [studentId]);
   },
 
-  // XÃ³a táº¥t cáº£ há»c sinh trong lá»›p
+  // Xoa tat ca hoc sinh trong lop
   deleteByClassId: async (classId) => {
     return await run('DELETE FROM students WHERE class_id = ?', [classId]);
   }
@@ -207,7 +275,7 @@ export const studentsDB = {
 
 // Attendance Sessions
 export const attendanceSessionsDB = {
-  // Táº¡o buá»•i Ä‘iá»ƒm danh má»›i
+  // Tao buoi diem danh moi
   create: async (classId, attendanceDate, attendanceType, attendanceMethod = 'manual') => {
     const result = await run(`
       INSERT INTO attendance_sessions (class_id, attendance_date, attendance_type, attendance_method)
@@ -216,7 +284,7 @@ export const attendanceSessionsDB = {
     return result.lastID;
   },
 
-  // Láº¥y lá»‹ch sá»­ Ä‘iá»ƒm danh theo lá»›p
+  // Lay sach buoi diem danh theo lop
   getByClassId: async (classId, startDate = null, endDate = null) => {
     let query = `
       SELECT 
@@ -248,7 +316,7 @@ export const attendanceSessionsDB = {
     return await all(query, params);
   },
 
-  // Láº¥y chi tiáº¿t buá»•i Ä‘iá»ƒm danh
+  // Lay chi tiet buoi diem danh
   getById: async (sessionId) => {
     return await get(`
       SELECT 
@@ -264,7 +332,7 @@ export const attendanceSessionsDB = {
     `, [sessionId]);
   },
 
-  // XÃ³a session (records sáº½ tá»± Ä‘á»™ng xÃ³a do ON DELETE CASCADE)
+  // Xoa session
   delete: async (sessionId) => {
     return await run('DELETE FROM attendance_sessions WHERE id = ?', [sessionId]);
   }
@@ -272,7 +340,7 @@ export const attendanceSessionsDB = {
 
 // Attendance Records
 export const attendanceRecordsDB = {
-  // Táº¡o nhiá»u báº£n ghi Ä‘iá»ƒm danh cÃ¹ng lÃºc
+  // Tao nhiu ban ghi diem danh cung luc
   createBulk: async (sessionId, records) => {
     await run('BEGIN TRANSACTION');
     try {
@@ -289,7 +357,7 @@ export const attendanceRecordsDB = {
     }
   },
 
-  // Láº¥y chi tiáº¿t Ä‘iá»ƒm danh theo session
+  // Lay chi tiet diem danh theo session
   getBySessionId: async (sessionId) => {
     return await all(`
       SELECT 

@@ -12,13 +12,13 @@ const router = express.Router();
 
 /**
  * GET /api/export/class/:classId
- * Export dá»¯ liá»‡u Ä‘iá»ƒm danh ra Excel
+ * Export du lieu diem danh ra Excel
  * Query params: startDate (optional), endDate (optional)
  */
 router.get('/class/:classId',
     [
-        query('startDate').optional().isDate().withMessage('NgÃ y báº¯t Ä‘áº§u khÃ´ng há»£p lá»‡'),
-        query('endDate').optional().isDate().withMessage('NgÃ y káº¿t thÃºc khÃ´ng há»£p lá»‡')
+        query('startDate').optional().isDate().withMessage('Ngay bat dau khong hop le'),
+        query('endDate').optional().isDate().withMessage('Ngay ket thuc khong hop le')
     ],
     async (req, res) => {
         try {
@@ -34,29 +34,29 @@ router.get('/class/:classId',
             const { classId } = req.params;
             const { startDate, endDate } = req.query;
 
-            // Kiá»ƒm tra lá»›p cÃ³ tá»“n táº¡i khÃ´ng
+            // Kiem tra lop co ton tai khong
             const classInfo = await classesDB.getById(classId);
             if (!classInfo) {
                 return res.status(404).json({
                     success: false,
-                    error: 'KhÃ´ng tÃ¬m tháº¥y lá»›p'
+                    error: 'Khong tim thay lop'
                 });
             }
 
-            // Láº¥y danh sÃ¡ch thiáº¿u nhi
+            // Lay danh sach thieu nhi
             const students = await studentsDB.getByClassId(classId);
 
-            // Láº¥y lá»‹ch sá»­ Ä‘iá»ƒm danh
+            // Lay lich su diem danh
             const sessions = await attendanceSessionsDB.getByClassId(classId, startDate, endDate);
 
             if (sessions.length === 0) {
                 return res.status(404).json({
                     success: false,
-                    error: 'KhÃ´ng cÃ³ dá»¯ liá»‡u Ä‘iá»ƒm danh Ä‘á»ƒ export'
+                    error: 'Khong co du lieu diem danh de export'
                 });
             }
 
-            // Láº¥y chi tiáº¿t tá»«ng buá»•i Ä‘iá»ƒm danh
+            // Lay chi tiet tung buoi diem danh
             const sessionsWithRecords = [];
             for (const session of sessions) {
                 const records = await attendanceRecordsDB.getBySessionId(session.id);
@@ -69,10 +69,10 @@ router.get('/class/:classId',
             // Export ra Excel
             const excelBuffer = exportAttendanceToExcel(classInfo, students, sessionsWithRecords);
 
-            // Táº¡o tÃªn file
+            // Tao ten file
             const fileName = generateExcelFileName(classInfo.name);
 
-            // Set headers vÃ  gá»­i file
+            // Set headers va gui file
             res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
             res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
             res.send(excelBuffer);
@@ -81,7 +81,7 @@ router.get('/class/:classId',
             console.error('Error exporting attendance:', error);
             res.status(500).json({
                 success: false,
-                error: 'Lá»—i khi export dá»¯ liá»‡u'
+                error: 'Loi khi export du lieu'
             });
         }
     }
@@ -89,29 +89,29 @@ router.get('/class/:classId',
 
 /**
  * GET /api/export/class/:classId/original
- * Export file Excel gá»‘c Ä‘Ã£ Ä‘Æ°á»£c cáº­p nháº­t vá»›i táº¥t cáº£ dá»¯ liá»‡u Ä‘iá»ƒm danh
+ * Export file Excel goc da duoc cap nhat voi tat ca du lieu diem danh
  */
 router.get('/class/:classId/original', async (req, res) => {
     try {
         const { classId } = req.params;
 
-        // Kiá»ƒm tra lá»›p cÃ³ tá»“n táº¡i khÃ´ng
+        // Kiem tra lop co ton tai khong
         const classInfo = await classesDB.getById(classId);
         if (!classInfo) {
             return res.status(404).json({
                 success: false,
-                error: 'KhÃ´ng tÃ¬m tháº¥y lá»›p'
+                error: 'Khong tim thay lop'
             });
         }
 
-        // Import cÃ¡c module cáº§n thiáº¿t
+        // Import cac module can thiet
         const { readFileSync, existsSync, readdirSync } = await import('fs');
         const { join, dirname } = await import('path');
         const { fileURLToPath } = await import('url');
 
         let excelFilePath = classInfo.excel_file_path;
 
-        // Náº¿u khÃ´ng cÃ³ excelFilePath, tÃ¬m trong thÆ° má»¥c uploads
+        // Neu khong co excelFilePath, tim trong thu muc uploads
         if (!excelFilePath) {
             const __filename = fileURLToPath(import.meta.url);
             const __dirname = dirname(__filename);
@@ -119,7 +119,7 @@ router.get('/class/:classId/original', async (req, res) => {
 
             if (existsSync(uploadsDir)) {
                 const files = readdirSync(uploadsDir);
-                // TÃ¬m file chá»©a tÃªn lá»›p (case-insensitive)
+                // Tim file chua ten lop (case-insensitive)
                 const className = classInfo.name.toLowerCase();
                 const matchingFile = files.find(f =>
                     f.toLowerCase().includes(className) &&
@@ -133,33 +133,33 @@ router.get('/class/:classId/original', async (req, res) => {
             }
         }
 
-        // Kiá»ƒm tra cÃ³ file Excel khÃ´ng
+        // Kiem tra co file Excel khong
         if (!excelFilePath) {
             return res.status(404).json({
                 success: false,
-                error: 'Lá»›p nÃ y khÃ´ng cÃ³ file Excel. Vui lÃ²ng upload file Excel trÆ°á»›c khi export.'
+                error: 'Lop nay khong co file Excel. Vui long upload file Excel truoc khi export.'
             });
         }
 
-        // Kiá»ƒm tra file cÃ³ tá»“n táº¡i khÃ´ng
+        // Kiem tra file co ton tai khong
         if (!existsSync(excelFilePath)) {
             return res.status(404).json({
                 success: false,
-                error: `File Excel khÃ´ng tá»“n táº¡i táº¡i: ${excelFilePath}`
+                error: `File Excel khong ton tai tai: ${excelFilePath}`
             });
         }
 
-        // Láº¥y táº¥t cáº£ sessions Ä‘iá»ƒm danh
+        // Lay tat ca sessions diem danh
         const sessions = await attendanceSessionsDB.getByClassId(classId);
 
-        // Ghi tá»«ng session vÃ o Excel
+        // Ghi tung session vao Excel
         if (sessions && sessions.length > 0) {
             const { writeAttendanceWithFormat } = await import('../utils/excelWriterWithFormat.js');
 
             for (const session of sessions) {
                 const records = await attendanceRecordsDB.getBySessionId(session.id);
 
-                // Ghi vÃ o Excel cho tá»«ng thiáº¿u nhi
+                // Ghi vao Excel cho tung thieu nhi
                 for (const record of records) {
                     if (record.isPresent) {
                         try {
@@ -172,20 +172,20 @@ router.get('/class/:classId/original', async (req, res) => {
                             );
                         } catch (err) {
                             console.error(`Error writing attendance for ${record.fullName}:`, err.message);
-                            // Continue vá»›i records khÃ¡c
+                            // Continue voi records khac
                         }
                     }
                 }
             }
         }
 
-        // Äá»c file (Ä‘Ã£ cáº­p nháº­t hoáº·c gá»‘c náº¿u khÃ´ng cÃ³ sessions)
+        // Doc file (da cap nhat hoac goc neu khong co sessions)
         const fileBuffer = readFileSync(excelFilePath);
 
-        // Táº¡o tÃªn file
+        // Tao ten file
         const fileName = `${classInfo.name}_Updated_${new Date().toISOString().split('T')[0]}.xlsx`;
 
-        // Set headers vÃ  gá»­i file
+        // Set headers va gui file
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
         res.send(fileBuffer);
@@ -194,7 +194,7 @@ router.get('/class/:classId/original', async (req, res) => {
         console.error('Error exporting original Excel:', error);
         res.status(500).json({
             success: false,
-            error: `Lá»—i khi export file Excel: ${error.message}`
+            error: `Loi khi export file Excel: ${error.message}`
         });
     }
 });

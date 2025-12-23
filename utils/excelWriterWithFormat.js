@@ -1,14 +1,14 @@
 ﻿import ExcelJS from 'exceljs';
 
 /**
- * Normalize tÃªn Ä‘á»ƒ so sÃ¡nh (loáº¡i bá» dáº¥u, khoáº£ng tráº¯ng thá»«a)
+ * Normalize ten de so sanh (loai bo dau, khoang trang)
  */
 function normalizeName(name) {
     if (!name) return '';
     return name
         .toLowerCase()
-        .replace(/Ä‘/g, 'd')
-        .replace(/Ä/g, 'd')
+        .replace(/\u0111/g, 'd')
+        .replace(/\u0110/g, 'd')
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .replace(/\s+/g, ' ')
@@ -16,7 +16,7 @@ function normalizeName(name) {
 }
 
 /**
- * Format date tá»« "2025-12-18" hoáº·c "18/12/2025" thÃ nh "18/12"
+ * Format date tu "2025-12-18" hoac "18/12/2025" thanh "18/12"
  */
 function formatDateForExcel(dateString) {
     if (dateString.includes('-')) {
@@ -35,7 +35,7 @@ function formatDateForExcel(dateString) {
 }
 
 /**
- * TÃ¬m sheet cÃ³ tÃªn chá»©a "Ä‘iá»ƒm danh"
+ * Tim sheet co ten la "diem danh"
  */
 function findAttendanceSheet(workbook) {
     const sheetNames = workbook.worksheets.map(ws => ws.name);
@@ -51,18 +51,18 @@ function findAttendanceSheet(workbook) {
 }
 
 /**
- * TÃ¬m dÃ²ng cá»§a thiáº¿u nhi trong sheet
+ * Tim dong cua thieu nhi trong sheet
  */
 function findStudentRow(worksheet, studentName) {
     const normalizedSearchName = normalizeName(studentName);
     let foundRow = -1;
 
-    // Duyá»‡t qua cÃ¡c dÃ²ng
+    // Duyet qua cac dong
     worksheet.eachRow((row, rowNumber) => {
-        if (foundRow !== -1) return; // Already found
+        if (foundRow !== -1) return; // Da tim thay
 
-        // Kiá»ƒm tra cá»™t D (há» vÃ  tÃªn Ä‘á»‡m) vÃ  E (tÃªn)
-        const colD = row.getCell(4).value; // Column D (index 4)
+        // Kiem tra cot D (ho va ten dam) va E (ten)
+        const colD = row.getCell(4).value; // Cot D (index 4)
         const colE = row.getCell(5).value; // Column E (index 5)
 
         if (colD) {
@@ -75,7 +75,7 @@ function findStudentRow(worksheet, studentName) {
             }
         }
 
-        // Fallback: tÃ¬m trong cÃ¡c cá»™t khÃ¡c
+        // Fallback: tim trong cac cot khac
         for (let col = 1; col <= 6; col++) {
             const cell = row.getCell(col);
             if (cell.value) {
@@ -94,20 +94,20 @@ function findStudentRow(worksheet, studentName) {
 }
 
 /**
- * TÃ¬m cá»™t theo ngÃ y vÃ  loáº¡i Ä‘iá»ƒm danh
+ * Tim cot theo ngay va loai diem danh
  */
 function findDateColumn(worksheet, date, attendanceType) {
     const dateStr = formatDateForExcel(date);
 
     const patterns = {
-        'Há»c GiÃ¡o LÃ½': ['H', 'Há»ŒC GL', 'HGL', 'HOC GL'],
-        'Lá»… Thá»© 5': ['Lá»„ T5', 'T5', 'LE T5', 'LT5'],
-        'Lá»… ChÃºa Nháº­t': ['L', 'Lá»„ CN', 'LCN', 'LE CN', 'CHU NHAT', 'CN']
+        'Hoc Giao Ly': ['H', 'Há»ŒC GL', 'HGL', 'HOC GL'],
+        'Le Thu 5': ['Lá»„ T5', 'T5', 'LE T5', 'LT5'],
+        'Le Chua Nhat': ['L', 'Lá»„ CN', 'LCN', 'LE CN', 'CHU NHAT', 'CN']
     };
 
     const typePatterns = patterns[attendanceType] || [];
 
-    // TÃ¬m dÃ²ng header (dÃ²ng cÃ³ nhiá»u ngÃ y)
+    // Tim dong header (dong co nhieu ngay)
     let headerRow = -1;
     for (let rowNum = 1; rowNum <= Math.min(20, worksheet.rowCount); rowNum++) {
         const row = worksheet.getRow(rowNum);
@@ -135,7 +135,7 @@ function findDateColumn(worksheet, date, attendanceType) {
 
     let lastSeenDate = null;
 
-    // Duyá»‡t qua cÃ¡c cá»™t
+    // Duyet qua cac cot
     for (let col = 1; col <= worksheet.columnCount; col++) {
         const dateCell = headerRowObj.getCell(col);
         const typeCell = typeRowObj.getCell(col);
@@ -170,63 +170,62 @@ function findDateColumn(worksheet, date, attendanceType) {
 }
 
 /**
- * Ghi Ä‘iá»ƒm danh vÃ o file Excel (GIá»® NGUYÃŠN FORMAT)
- * @param {string} filePath - ÄÆ°á»ng dáº«n file Excel
- * @param {string} studentName - TÃªn thiáº¿u nhi
- * @param {string} date - NgÃ y Ä‘iá»ƒm danh
- * @param {string} attendanceType - Loáº¡i Ä‘iá»ƒm danh
- * @param {boolean} isPresent - CÃ³ máº·t hay khÃ´ng
+ * Ghi diem danh vao file excel (GIU NGUYEN TAT CA FORMAT)
+ * @param {string} filePath - Dinh danh file excel
+ * @param {string} studentName - Ten thieu nhi
+ * @param {string} date - Ngay diem danh
+ * @param {string} attendanceType - Loai diem danh
+ * @param {boolean} isPresent - Co mat hay khong
  * @returns {Object} { success: boolean, message: string }
  */
 export async function writeAttendanceWithFormat(filePath, studentName, date, attendanceType, isPresent) {
     try {
-        // Äá»c file Excel
+        // Doc file excel
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(filePath);
 
-        // TÃ¬m sheet Ä‘iá»ƒm danh
+        // Tim sheet diem danh
         const worksheet = findAttendanceSheet(workbook);
         if (!worksheet) {
             return {
                 success: false,
-                message: 'KhÃ´ng tÃ¬m tháº¥y sheet Ä‘iá»ƒm danh trong file Excel'
+                message: 'Khong tim thay sheet diem danh trong file excel'
             };
         }
 
-        // TÃ¬m dÃ²ng cá»§a thiáº¿u nhi
+        // Tim dong cua thieu nhi
         const studentRow = findStudentRow(worksheet, studentName);
         if (studentRow === -1) {
             return {
                 success: false,
-                message: `KhÃ´ng tÃ¬m tháº¥y thiáº¿u nhi "${studentName}" trong sheet`
+                message: `Khong tim thay thieu nhi "${studentName}" trong sheet`
             };
         }
 
-        // TÃ¬m cá»™t theo ngÃ y vÃ  loáº¡i Ä‘iá»ƒm danh
+        // Tim cot theo ngay va loai diem danh
         const dateColumn = findDateColumn(worksheet, date, attendanceType);
         if (dateColumn === -1) {
             return {
                 success: false,
-                message: `KhÃ´ng tÃ¬m tháº¥y cá»™t cho ngÃ y ${date} - ${attendanceType}`
+                message: `Khong tim thay cot cho ngay ${date} - ${attendanceType}`
             };
         }
 
-        // Ghi giÃ¡ trá»‹ vÃ o Ã´ (GIá»® NGUYÃŠN FORMAT)
+        // Ghi gia tri vao o (GIAYUEN FORMAT)
         const cell = worksheet.getRow(studentRow).getCell(dateColumn);
         cell.value = isPresent ? 1 : 0;
-        // KhÃ´ng thay Ä‘á»•i style, format cá»§a cell
 
         // Force Excel to recalculate all formulas when opening the file
         workbook.calcProperties = {
             fullCalcOnLoad: true
         };
 
-        // LÆ°u file (GIá»® NGUYÃŠN Táº¤T Cáº¢ FORMAT)
+        // Luu file (GIU NGUYEN TAT CA FORMAT)
         await workbook.xlsx.writeFile(filePath);
 
         return {
             success: true,
-            message: `ÄÃ£ ghi Ä‘iá»ƒm danh cho ${studentName} vÃ o ${date} - ${attendanceType}`,
+            message: `Da ghi diem danh cho ${studentName} vao ${date} - ${attendanceType}`,
             details: {
                 sheet: worksheet.name,
                 row: studentRow,
@@ -237,7 +236,7 @@ export async function writeAttendanceWithFormat(filePath, studentName, date, att
     } catch (error) {
         return {
             success: false,
-            message: `Lá»—i khi ghi file Excel: ${error.message}`
+            message: `Loi khi ghi file excel: ${error.message}`
         };
     }
 }
