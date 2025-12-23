@@ -1,141 +1,101 @@
 ﻿import XLSX from 'xlsx';
-import { readFileSync } from 'fs';
 
-/**
- * Convert Excel serial date to DD/MM/YYYY format
- * @param {number} serial - Excel serial date number
- * @returns {string} Date in DD/MM/YYYY format
- */
 function excelSerialToDate(serial) {
-    if (!serial || isNaN(serial)) return serial;
-
-    // Náº¿u khÃ´ng pháº£i sá»‘, tráº£ vá» nguyÃªn giÃ¡ trá»‹
-    if (typeof serial !== 'number') return serial;
-
-    // Use XLSX's built-in date parser for accurate conversion
-    const dateObj = XLSX.SSF.parse_date_code(serial);
-
-    if (!dateObj) return serial;
-
-    const day = String(dateObj.d).padStart(2, '0');
-    const month = String(dateObj.m).padStart(2, '0');
-    const year = dateObj.y;
-
-    return `${day}/${month}/${year}`;
-}
-
-/**
- * Process cell value - convert Excel serial dates to readable format
- * @param {any} value - Cell value
- * @param {number} colIndex - Column index (0-based)
- * @returns {any} Processed value
- */
-function processCellValue(value, colIndex) {
-    // Auto-detect Excel serial dates
-    // Excel dates are typically between 1 (1/1/1900) and 100000 (year 2173)
-    if (typeof value === 'number' && value > 1 && value < 100000) {
-        // Check if it looks like a date (no decimals or small decimals)
-        const hasSmallDecimal = (value % 1) < 0.01;
-        if (hasSmallDecimal || value % 1 === 0) {
-            // Likely a date - convert it
-            return excelSerialToDate(value);
-        }
+    if (!serial || typeof serial !== 'number') {
+        return null;
     }
-    return value;
-}
-
-/**
- * Äá»c táº¥t cáº£ cÃ¡c sheets tá»« file Excel
- * @param {string} filePath - ÄÆ°á»ng dáº«n tá»›i file Excel
- * @returns {Array} Máº£ng cÃ¡c sheets vá»›i tÃªn vÃ  dá»¯ liá»‡u
- */
-export function readAllSheets(filePath) {
     try {
-        // Äá»c file Excel
-        const fileBuffer = readFileSync(filePath);
-        const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-
-        // Láº¥y táº¥t cáº£ sheets
-        const sheets = [];
-
-        for (const sheetName of workbook.SheetNames) {
-            const worksheet = workbook.Sheets[sheetName];
-
-            // Convert sheet sang máº£ng 2D
-            const rawData = XLSX.utils.sheet_to_json(worksheet, {
-                header: 1,  // Tráº£ vá» máº£ng 2D thay vÃ¬ objects
-                defval: ''  // GiÃ¡ trá»‹ máº·c Ä‘á»‹nh cho Ã´ trá»‘ng
-            });
-
-            // Process data - convert Excel serial dates
-            const data = rawData.map(row =>
-                row.map((cell, colIndex) => processCellValue(cell, colIndex))
-            );
-
-            sheets.push({
-                name: sheetName,
-                data: data,
-                rowCount: data.length,
-                colCount: data.length > 0 ? Math.max(...data.map(row => row.length)) : 0
-            });
-        }
-
-        return sheets;
-
+        const parsed = XLSX.SSF.parse_date_code(serial);
+        if (!parsed) return null;
+        const day = String(parsed.d).padStart(2, '0');
+        const month = String(parsed.m).padStart(2, '0');
+        const year = parsed.y;
+        return `${day}/${month}/${year}`;
     } catch (error) {
-        throw new Error(`Lá»—i khi Ä‘á»c file Excel: ${error.message}`);
+        console.error('Error converting Excel serial date:', error);
+        return null;
     }
 }
 
-/**
- * Äá»c má»™t sheet cá»¥ thá»ƒ tá»« file Excel
- * @param {string} filePath - ÄÆ°á»ng dáº«n tá»›i file Excel
- * @param {string} sheetName - TÃªn sheet cáº§n Ä‘á»c
- * @returns {Object} Dá»¯ liá»‡u cá»§a sheet
- */
-export function readSheet(filePath, sheetName) {
+function processCellValue(cell) {
+    if (!cell || cell.v === undefined || cell.v === null) {
+        return '';
+    }
+    if (cell.t === 'n' && cell.v > 40000 && cell.v < 60000) {
+        return excelSerialToDate(cell.v);
+    }
+    return String(cell.v).trim();
+}
+
+export function readExcelFile(filePath) {
     try {
-        const fileBuffer = readFileSync(filePath);
-        const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-
-        if (!workbook.SheetNames.includes(sheetName)) {
-            throw new Error(`Sheet "${sheetName}" khÃ´ng tá»“n táº¡i trong file`);
-        }
-
+        const workbook = XLSX.readFile(filePath);
+        const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const rawData = XLSX.utils.sheet_to_json(worksheet, {
-            header: 1,
-            defval: ''
-        });
+        const range = XLSX.utils.decode_range(worksheet['!ref']);
 
-        // Process data - convert Excel serial dates
-        const data = rawData.map(row =>
-            row.map((cell, colIndex) => processCellValue(cell, colIndex))
-        );
+        const headers = {};
+        for (let col = range.s.c; col <= range.e.c; col++) {
+            const cellAddress = XLSX.utils.encode_cell({ r: 0, c: col });
+            const cell = worksheet[cellAddress];
+            if (cell && cell.v) {
+                const headerText = String(cell.v).toLowerCase().trim();
+                headers[col] = headerText;
+            }
+        }
 
-        return {
-            name: sheetName,
-            data: data,
-            rowCount: data.length,
-            colCount: data.length > 0 ? Math.max(...data.map(row => row.length)) : 0
-        };
+        const students = [];
+        for (let row = range.s.r + 1; row <= range.e.r; row++) {
+            const student = {
+                stt: null,
+                baptismalName: '',
+                fullName: '',
+                dateOfBirth: '',
+                fatherName: '',
+                motherName: '',
+                address: '',
+                phone: ''
+            };
 
+            let hasData = false;
+
+            for (let col = range.s.c; col <= range.e.c; col++) {
+                const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+                const cell = worksheet[cellAddress];
+                const header = headers[col];
+                const value = processCellValue(cell);
+
+                if (value) hasData = true;
+
+                if (header && header.includes('stt')) {
+                    student.stt = parseInt(value) || null;
+                } else if (header && (header.includes('tên thánh') || header.includes('ten thanh'))) {
+                    student.baptismalName = value;
+                } else if (header && (header.includes('họ') || header.includes('tên') || header.includes('ho ten'))) {
+                    student.fullName = value;
+                } else if (header && (header.includes('ngày sinh') || header.includes('ngay sinh') || header.includes('sinh'))) {
+                    student.dateOfBirth = value;
+                } else if (header && (header.includes('cha') || header.includes('bố') || header.includes('bo'))) {
+                    student.fatherName = value;
+                } else if (header && (header.includes('mẹ') || header.includes('me') || header.includes('má'))) {
+                    student.motherName = value;
+                } else if (header && (header.includes('địa chỉ') || header.includes('dia chi') || header.includes('nơi ở'))) {
+                    student.address = value;
+                } else if (header && (header.includes('điện thoại') || header.includes('dien thoai') || header.includes('sđt') || header.includes('phone'))) {
+                    student.phone = value;
+                }
+            }
+
+            if (hasData && student.fullName) {
+                students.push(student);
+            }
+        }
+
+        return students;
     } catch (error) {
-        throw new Error(`Lá»—i khi Ä‘á»c sheet: ${error.message}`);
+        console.error('Error reading Excel file:', error);
+        throw new Error('Failed to read Excel file: ' + error.message);
     }
 }
 
-/**
- * Láº¥y danh sÃ¡ch tÃªn cÃ¡c sheets trong file Excel
- * @param {string} filePath - ÄÆ°á»ng dáº«n tá»›i file Excel
- * @returns {Array} Máº£ng tÃªn cÃ¡c sheets
- */
-export function getSheetNames(filePath) {
-    try {
-        const fileBuffer = readFileSync(filePath);
-        const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-        return workbook.SheetNames;
-    } catch (error) {
-        throw new Error(`Lá»—i khi Ä‘á»c danh sÃ¡ch sheets: ${error.message}`);
-    }
-}
+export default { readExcelFile };
