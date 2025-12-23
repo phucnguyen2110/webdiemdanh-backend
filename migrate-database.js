@@ -37,7 +37,7 @@ async function migrate() {
             } catch (err) {
                 if (err.message.includes('no such table')) {
                     console.log('Table attendance_sessions not found. Skipping migration.');
-                    db.close();
+                    // db.close(); // Will be closed in finally
                     return;
                 }
                 throw err;
