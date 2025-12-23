@@ -1,16 +1,30 @@
 ﻿import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import { initializeDatabase } from './database.js';
 import classesRouter from './routes/classes.js';
 import attendanceRouter from './routes/attendance.js';
 import exportRouter from './routes/export.js';
 import studentsRouter from './routes/students.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 // Khá»Ÿi táº¡o Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Khá»Ÿi táº¡o database
+// Tạo thư mục uploads nếu chưa tồn tại
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    console.log('✅ Created uploads directory:', uploadsDir);
+}
+
+// Khởi tạo database
 initializeDatabase();
 
 // Middleware
@@ -24,7 +38,7 @@ app.use(cors({
     origin: (origin, callback) => {
         // Allow requests with no origin (mobile apps, Postman, etc.)
         if (!origin) return callback(null, true);
-        
+
         if (allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
