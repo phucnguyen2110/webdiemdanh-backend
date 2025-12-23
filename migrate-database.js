@@ -1,5 +1,4 @@
 import sqlite3 from 'sqlite3';
-import { open } from 'sqlite3';
 
 async function migrate() {
     console.log('Starting migration...');
@@ -15,13 +14,41 @@ async function migrate() {
         });
     };
 
-    try {
-        // 1. Rename old table
-        console.log('Renaming old table...');
-        await run("ALTER TABLE attendance_sessions RENAME TO attendance_sessions_old");
+    const get = (sql, params = []) => {
+        return new Promise((resolve, reject) => {
+            db.get(sql, params, (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
+    };
 
-        // 2. Create new table with correct schema (no encoding issues in CHECK constraint)
+    try {
+        // Check if old table exists (migration already happened or in progress)
+        const oldTableExists = await get("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance_sessions_old'");
+
+        if (oldTableExists) {
+            console.log('attendance_sessions_old exists. Migration might have run or been interrupted.');
+        } else {
+            // 1. Rename old table
+            console.log('Renaming old table...');
+            try {
+                await run("ALTER TABLE attendance_sessions RENAME TO attendance_sessions_old");
+            } catch (err) {
+                if (err.message.includes('no such table')) {
+                    console.log('Table attendance_sessions not found. Skipping migration.');
+                    db.close();
+                    return;
+                }
+                throw err;
+            }
+        }
+
+        // 2. Create new table with correct schema
         console.log('Creating new table...');
+        // First drop if exists (in case previous run failed after rename but before copy)
+        await run("DROP TABLE IF EXISTS attendance_sessions");
+
         await run(`
             CREATE TABLE attendance_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,18 +62,7 @@ async function migrate() {
         `);
 
         // 3. Copy data from old table to new table
-        // Note: attendance_type might need mapping if old data has issues, 
-        // but assuming we are fixing schema for future data mostly.
-        // If old data has encoding issues, copying might fail on CHECK constraint.
-        // So we might need to update old data first or ignore check constraint during copy?
-        // Actually best is to just re-insert with valid values if possible.
-        // For simplicity and safety against data loss, we try to copy what matches.
-
         console.log('Copying data...');
-        // We assume old data is empty or acceptable. 
-        // If old data has invalid values, this mapping is needed:
-        // 'Học Giáo Lý' -> 'Hoc Giao Ly' etc.
-
         try {
             await run(`
                 INSERT INTO attendance_sessions (id, class_id, attendance_date, attendance_type, attendance_method, created_at)
@@ -62,8 +78,8 @@ async function migrate() {
             `);
             console.log('Data copied successfully.');
         } catch (copyError) {
-            console.error('Error copying data (might due to constraint violations):', copyError);
-            console.log('Skipping data copy to ensure schema fix.');
+            console.error('Error copying data:', copyError);
+            console.log('Continuing...');
         }
 
         // 4. Drop old table
@@ -74,9 +90,7 @@ async function migrate() {
 
     } catch (error) {
         console.error('Migration failed:', error);
-        // Rollback attempt?
-        // SQLite doesn't support complex rollback if DDL fails mid-way easily without transaction logic carefully handled.
-        // But RENAME is atomic.
+        process.exit(1);
     } finally {
         db.close();
     }
