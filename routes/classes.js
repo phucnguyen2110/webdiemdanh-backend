@@ -82,7 +82,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             }
 
             // Update excel file path
-            await classesDB.update(classId, className.trim());
+            await classesDB.update(classId, className.trim(), req.file.path);
         } else {
             // Create new class
             classId = await classesDB.create(className.trim(), req.file.path, req.file.originalname);
