@@ -1,28 +1,28 @@
 ﻿import XLSX from 'xlsx';
 
 /**
- * Export dá»¯ liá»‡u Ä‘iá»ƒm danh ra file Excel
- * @param {Object} classInfo - ThÃ´ng tin lá»›p {id, name}
- * @param {Array} students - Danh sÃ¡ch thiáº¿u nhi
- * @param {Array} sessions - Danh sÃ¡ch buá»•i Ä‘iá»ƒm danh vá»›i records
+ * Export du lieu diem danh ra file Excel
+ * @param {Object} classInfo - Thong tin lop {id, name}
+ * @param {Array} students - Danh sach thieu nhi
+ * @param {Array} sessions - Danh sach buoi diem danh voi records
  * @returns {Buffer} Excel file buffer
  */
 export function exportAttendanceToExcel(classInfo, students, sessions) {
-    // Táº¡o workbook má»›i
+    // Tao workbook moi
     const workbook = XLSX.utils.book_new();
 
-    // === SHEET 1: Tá»•ng há»£p Ä‘iá»ƒm danh ===
+    // === SHEET 1: Tong hop diem danh ===
     const summaryData = [];
 
     // Header
-    const header = ['STT', 'Há» vÃ  TÃªn'];
+    const header = ['STT', 'Ho va Ten'];
     sessions.forEach(session => {
         const dateStr = new Date(session.attendanceDate).toLocaleDateString('vi-VN');
         header.push(`${dateStr}\n${session.attendanceType}`);
     });
     summaryData.push(header);
 
-    // Táº¡o map Ä‘á»ƒ tra cá»©u nhanh
+    // Tao map de tra cuu nhanh
     const sessionRecordsMap = {};
     sessions.forEach(session => {
         sessionRecordsMap[session.id] = {};
@@ -31,7 +31,7 @@ export function exportAttendanceToExcel(classInfo, students, sessions) {
         });
     });
 
-    // Dá»¯ liá»‡u tá»«ng thiáº¿u nhi
+    // Danh sach thieu nhi
     students.forEach(student => {
         const row = [student.stt, student.fullName];
 
@@ -43,9 +43,9 @@ export function exportAttendanceToExcel(classInfo, students, sessions) {
         summaryData.push(row);
     });
 
-    // ThÃªm dÃ²ng thá»‘ng kÃª
+    // Them dong thong ke
     summaryData.push([]);
-    const statsRow = ['', 'Tá»•ng cÃ³ máº·t'];
+    const statsRow = ['', 'Tong co mat'];
     sessions.forEach(session => {
         const presentCount = session.records.filter(r => r.isPresent).length;
         statsRow.push(presentCount);
@@ -57,13 +57,13 @@ export function exportAttendanceToExcel(classInfo, students, sessions) {
     // Set column widths
     summarySheet['!cols'] = [
         { wch: 5 },  // STT
-        { wch: 25 }, // Há» tÃªn
-        ...sessions.map(() => ({ wch: 15 })) // CÃ¡c cá»™t ngÃ y
+        { wch: 25 }, // Ho va Ten
+        ...sessions.map(() => ({ wch: 15 })) // Cac cot ngay
     ];
 
-    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Tá»•ng há»£p');
+    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Tong hop');
 
-    // === SHEET 2: Chi tiáº¿t tá»«ng buá»•i ===
+    // === SHEET 2: Chi tiet tung buoi ===
     const detailData = [];
 
     sessions.forEach((session, index) => {
@@ -72,31 +72,31 @@ export function exportAttendanceToExcel(classInfo, students, sessions) {
         }
 
         const dateStr = new Date(session.attendanceDate).toLocaleDateString('vi-VN');
-        detailData.push([`NgÃ y: ${dateStr} - ${session.attendanceType}`]);
-        detailData.push(['STT', 'Há» vÃ  TÃªn', 'CÃ³ máº·t']);
+        detailData.push([`Ngay: ${dateStr} - ${session.attendanceType}`]);
+        detailData.push(['STT', 'Ho va Ten', 'Co Mat']);
 
         session.records.forEach(record => {
             detailData.push([
                 record.stt,
                 record.fullName,
-                record.isPresent ? 'CÃ³' : 'Váº¯ng'
+                record.isPresent ? 'CO' : 'VANG'
             ]);
         });
 
         const presentCount = session.records.filter(r => r.isPresent).length;
         const totalCount = session.records.length;
         detailData.push([]);
-        detailData.push(['', 'Tá»•ng káº¿t:', `${presentCount}/${totalCount} em cÃ³ máº·t`]);
+        detailData.push(['', 'Tong ket:', `${presentCount}/${totalCount} thieu nhi co mat`]);
     });
 
     const detailSheet = XLSX.utils.aoa_to_sheet(detailData);
     detailSheet['!cols'] = [
         { wch: 5 },  // STT
-        { wch: 25 }, // Há» tÃªn
-        { wch: 10 }  // CÃ³ máº·t
+        { wch: 25 }, // Ho va Ten
+        { wch: 10 }  // Co Mat
     ];
 
-    XLSX.utils.book_append_sheet(workbook, detailSheet, 'Chi tiáº¿t');
+    XLSX.utils.book_append_sheet(workbook, detailSheet, 'Chi tiet');
 
     // Convert workbook to buffer
     const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });

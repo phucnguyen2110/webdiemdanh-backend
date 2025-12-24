@@ -4,11 +4,17 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { initializeDatabase } from './database.js';
+import dotenv from 'dotenv';
+// Switch to Supabase PostgreSQL
+import { initializeDatabase } from './database-supabase.js';
+import { testSupabaseConnection } from './supabase.js';
 import classesRouter from './routes/classes.js';
 import attendanceRouter from './routes/attendance.js';
 import exportRouter from './routes/export.js';
 import studentsRouter from './routes/students.js';
+
+// Load environment variables
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,6 +32,20 @@ if (!fs.existsSync(uploadsDir)) {
 
 // Khởi tạo database
 initializeDatabase();
+
+// Test Supabase connection
+testSupabaseConnection();
+
+// Log environment info
+const isDevelopment = process.env.NODE_ENV !== 'production';
+console.log('='.repeat(50));
+console.log(`🌍 Environment: ${isDevelopment ? 'DEVELOPMENT' : 'PRODUCTION'}`);
+console.log(`📊 Database: Supabase PostgreSQL`);
+console.log(`📁 File Storage: ${isDevelopment ? 'Local (uploads/)' : 'Supabase Storage'}`);
+if (isDevelopment) {
+    console.log(`🏷️  Class Prefix: [DEV] (auto-added)`);
+}
+console.log('='.repeat(50));
 
 // Middleware
 const allowedOrigins = [
@@ -108,10 +128,10 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, () => {
     console.log('='.repeat(50));
-    console.log('ðŸš€ Server Ä‘ang cháº¡y táº¡i:');
+    console.log('Server dang chay tai:');
     console.log(`   http://localhost:${PORT}`);
     console.log('='.repeat(50));
-    console.log('ðŸ“š API Endpoints:');
+    console.log('API Endpoints:');
     console.log(`   GET    /api/health`);
     console.log(`   GET    /api/classes`);
     console.log(`   POST   /api/classes/upload`);

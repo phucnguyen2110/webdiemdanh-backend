@@ -5,7 +5,7 @@ import {
     attendanceRecordsDB,
     classesDB,
     studentsDB
-} from '../database.js';
+} from '../database-supabase.js';
 import { writeAttendanceWithFormat } from '../utils/excelWriterWithFormat.js';
 import { existsSync } from 'fs';
 
@@ -67,22 +67,34 @@ router.post('/',
                             const student = students.find(s => s.id === record.studentId);
 
                             if (student) {
-                                console.log(`Writing attendance for ${student.fullName}, date: ${attendanceDate}, type: ${attendanceType}`);
-                                const result = await writeAttendanceWithFormat(
-                                    classInfo.excel_file_path,
-                                    student.fullName,
-                                    attendanceDate,
-                                    attendanceType,
-                                    record.isPresent
-                                );
-                                console.log('Write result:', result);
-                                excelResults.push({
-                                    student: student.fullName,
-                                    ...result
-                                });
+                                try {
+                                    console.log(`Writing attendance for ${student.fullName}, date: ${attendanceDate}, type: ${attendanceType}`);
+                                    const result = await writeAttendanceWithFormat(
+                                        classInfo.excel_file_path,
+                                        student.fullName,
+                                        attendanceDate,
+                                        attendanceType,
+                                        record.isPresent
+                                    );
+                                    console.log('Write result:', result);
+                                    excelResults.push({
+                                        student: student.fullName,
+                                        ...result
+                                    });
+                                } catch (writeError) {
+                                    console.error(`Error writing attendance for ${student.fullName}:`, writeError.message);
+                                    excelResults.push({
+                                        student: student.fullName,
+                                        success: false,
+                                        message: `Loi khi ghi file excel: ${writeError.message}`
+                                    });
+                                    // Continue with other students
+                                }
                             }
                         }
                     }
+                } else {
+                    console.log('Skipping Excel write: File path not available or file does not exist');
                 }
             } catch (excelError) {
                 console.error('Error writing to Excel:', excelError);

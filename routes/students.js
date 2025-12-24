@@ -1,6 +1,6 @@
 ﻿import express from 'express';
 import QRCode from 'qrcode';
-import { studentsDB } from '../database.js';
+import { studentsDB } from '../database-supabase.js';
 
 const router = express.Router();
 

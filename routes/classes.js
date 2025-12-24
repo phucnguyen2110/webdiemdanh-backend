@@ -1,11 +1,11 @@
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
-import fs, { existsSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { classesDB, studentsDB } from '../database.js';
+import { classesDB, studentsDB } from '../database-supabase.js';
 import { readExcelFile } from '../utils/excelReader.js';
+import { storageManager } from '../storageManager.js';
 import XLSX from 'xlsx';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -51,10 +51,19 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         if (!req.file) {
             return res.status(400).json({ success: false, error: 'No file uploaded' });
         }
-        const { className } = req.body;
+        let { className } = req.body;
         if (!className || !className.trim()) {
             return res.status(400).json({ success: false, error: 'Class name is required' });
         }
+
+        // Auto-add [DEV] prefix in development
+        const isDevelopment = process.env.NODE_ENV !== 'production';
+        const originalClassName = className.trim();
+
+        if (isDevelopment && !originalClassName.startsWith('[DEV]')) {
+            className = `[DEV] ${originalClassName}`;
+        }
+
         const students = await readExcelFile(req.file.path);
         if (!students || students.length === 0) {
             return res.status(400).json({ success: false, error: 'No students found in Excel file' });
@@ -64,6 +73,15 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         const existingClasses = await classesDB.getAll();
         const existingClass = existingClasses.find(c => c.name === className.trim());
 
+        // Generate unique file name
+        const timestamp = Date.now();
+        const sanitizedClassName = className.trim().replace(/[^a-zA-Z0-9]/g, '_');
+        const fileName = `${sanitizedClassName}_${timestamp}.xlsx`;
+
+        // Upload file to storage (auto-detects dev/prod)
+        const uploadResult = await storageManager.uploadFile(req.file.path, fileName);
+        const filePath = uploadResult.filePath;
+
         let classId;
         if (existingClass) {
             // Class exists - delete old students and old file
@@ -72,31 +90,41 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
             // Delete old Excel file if exists
             const oldClass = await classesDB.getById(classId);
-            if (oldClass && oldClass.excel_file_path && existsSync(oldClass.excel_file_path)) {
+            if (oldClass && oldClass.excel_file_path) {
                 try {
-                    unlinkSync(oldClass.excel_file_path);
+                    await storageManager.deleteFile(oldClass.excel_file_path);
                     console.log('Deleted old Excel file:', oldClass.excel_file_path);
                 } catch (err) {
                     console.error('Error deleting old file:', err);
                 }
             }
 
-            // Update excel file path
-            await classesDB.update(classId, className.trim(), req.file.path);
+            // Update class name (file path is not stored in update)
+            await classesDB.update(classId, className.trim());
+            // Update file path in database
+            await classesDB.updateFilePath(classId, filePath);
         } else {
-            // Create new class
-            classId = await classesDB.create(className.trim(), req.file.path, req.file.originalname);
+            // Create new class with file path
+            classId = await classesDB.create(className.trim(), filePath);
         }
 
         // Insert all students at once using bulk insert
         await studentsDB.createBulk(classId, students);
+
+        const storageInfo = storageManager.getStorageInfo();
 
         res.json({
             success: true,
             message: existingClass ? 'Class updated successfully' : 'Class created successfully',
             classId: classId,
             className: className.trim(),
-            studentsCount: students.length
+            studentsCount: students.length,
+            environment: isDevelopment ? 'Development' : 'Production',
+            storage: {
+                type: storageInfo.storageType,
+                database: 'Supabase PostgreSQL',
+                files: isDevelopment ? 'Local (uploads/)' : 'Supabase Storage'
+            }
         });
     } catch (error) {
         console.error('Error uploading file:', error);
@@ -152,9 +180,9 @@ router.delete('/:classId', async (req, res) => {
         const classInfo = await classesDB.getById(classId);
 
         // Delete Excel file if exists
-        if (classInfo && classInfo.excel_file_path && existsSync(classInfo.excel_file_path)) {
+        if (classInfo && classInfo.excel_file_path) {
             try {
-                unlinkSync(classInfo.excel_file_path);
+                await storageManager.deleteFile(classInfo.excel_file_path);
                 console.log('Deleted Excel file:', classInfo.excel_file_path);
             } catch (err) {
                 console.error('Error deleting file:', err);
@@ -185,13 +213,11 @@ router.get('/:classId/excel', async (req, res) => {
             return res.status(404).json({ success: false, error: 'No Excel file associated with this class' });
         }
 
-        // Check if file exists
-        if (!fs.existsSync(classInfo.excel_file_path)) {
-            return res.status(404).json({ success: false, error: 'Excel file not found on server' });
-        }
+        // Download file from storage (works for both local and Supabase)
+        const fileBuffer = await storageManager.downloadFile(classInfo.excel_file_path);
 
-        // Read Excel file
-        const workbook = XLSX.readFile(classInfo.excel_file_path);
+        // Read Excel file from buffer
+        const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
         const sheets = [];
 
         for (const sheetName of workbook.SheetNames) {
@@ -233,9 +259,17 @@ router.get('/:classId/excel', async (req, res) => {
             });
         }
 
+        // Extract file name from path
+        let fileName = 'excel_file.xlsx';
+        if (classInfo.excel_file_path.startsWith('supabase://')) {
+            fileName = classInfo.excel_file_path.split('/').pop();
+        } else {
+            fileName = path.basename(classInfo.excel_file_path);
+        }
+
         res.json({
             success: true,
-            fileName: path.basename(classInfo.excel_file_path),
+            fileName: fileName,
             sheets: sheets
         });
 

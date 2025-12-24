@@ -5,7 +5,7 @@ import {
     studentsDB,
     attendanceSessionsDB,
     attendanceRecordsDB
-} from '../database.js';
+} from '../database-supabase.js';
 import { exportAttendanceToExcel, generateExcelFileName } from '../utils/excelExporter.js';
 
 const router = express.Router();
