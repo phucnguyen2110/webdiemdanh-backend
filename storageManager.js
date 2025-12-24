@@ -156,14 +156,16 @@ export const storageManager = {
             const fileName = pathParts.slice(1).join('/');
 
             try {
+                // Try to download file metadata (lightweight check)
                 const { data, error } = await supabase.storage
                     .from(bucket)
-                    .list(path.dirname(fileName), {
-                        search: path.basename(fileName)
-                    });
+                    .download(fileName);
 
-                if (error) return false;
-                return data && data.length > 0;
+                if (error) {
+                    return false;
+                }
+
+                return true;
             } catch (error) {
                 return false;
             }
