@@ -83,10 +83,10 @@ export function exportAttendanceToExcel(classInfo, students, sessions) {
             ]);
         });
 
-        const presentCount = session.records.filter(r => r.isPresent).length;
-        const totalCount = session.records.length;
+        // const presentCount = session.records.filter(r => r.isPresent).length;
+        // const totalCount = session.records.length;
         detailData.push([]);
-        detailData.push(['', 'Tong ket:', `${presentCount}/${totalCount} thieu nhi co mat`]);
+        // detailData.push(['', 'Tong ket:', `${presentCount}/${totalCount} thieu nhi co mat`]);
     });
 
     const detailSheet = XLSX.utils.aoa_to_sheet(detailData);

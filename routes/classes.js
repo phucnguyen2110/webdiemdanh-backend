@@ -3,9 +3,10 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { classesDB, studentsDB, attendanceSessionsDB } from '../database-supabase.js';
+import { classesDB, studentsDB, attendanceSessionsDB, attendanceRecordsDB } from '../database-supabase.js';
 import { readExcelFile } from '../utils/excelReader.js';
 import { storageManager } from '../storageManager.js';
+import { mergeAttendanceIntoExcel } from '../utils/excelMerger.js';
 import XLSX from 'xlsx';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -214,9 +215,45 @@ router.get('/:classId/excel', async (req, res) => {
         }
 
         // Download file from storage (works for both local and Supabase)
-        const fileBuffer = await storageManager.downloadFile(classInfo.excel_file_path);
+        let fileBuffer = await storageManager.downloadFile(classInfo.excel_file_path);
 
-        // Read Excel file from buffer
+        // Get attendance data and merge into Excel file
+        const latestAttendance = await attendanceSessionsDB.getByClassId(classId);
+        if (latestAttendance.length > 0) {
+            // Deduplicate: Keep only latest session for each date+type combination
+            const sessionMap = new Map();
+            for (const session of latestAttendance) {
+                const key = `${session.attendanceDate}_${session.attendanceType}`;
+                const existing = sessionMap.get(key);
+
+                // Keep the session with latest createdAt
+                if (!existing || new Date(session.createdAt) > new Date(existing.createdAt)) {
+                    sessionMap.set(key, session);
+                }
+            }
+
+            const uniqueSessions = Array.from(sessionMap.values());
+            console.log(`📊 Deduplicated: ${latestAttendance.length} sessions → ${uniqueSessions.length} unique sessions`);
+
+            const attendanceSessions = [];
+            for (const session of uniqueSessions) {
+                const records = await attendanceRecordsDB.getBySessionId(session.id);
+                attendanceSessions.push({
+                    date: session.attendanceDate,
+                    type: session.attendanceType,
+                    records: records.map(r => ({
+                        studentName: r.fullName,
+                        isPresent: r.isPresent
+                    }))
+                });
+            }
+
+            // Merge attendance into Excel buffer
+            fileBuffer = mergeAttendanceIntoExcel(fileBuffer, attendanceSessions);
+            console.log(`✅ Merged ${attendanceSessions.length} attendance sessions into Excel`);
+        }
+
+        // Read Excel file from buffer (now with attendance data)
         const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
         const sheets = [];
 
@@ -268,10 +305,28 @@ router.get('/:classId/excel', async (req, res) => {
         }
 
         // Get latest attendance timestamp for cache invalidation
-        const latestAttendance = await attendanceSessionsDB.getByClassId(classId);
-        const lastUpdated = latestAttendance.length > 0
-            ? latestAttendance[0].createdAt
+        const attendanceForTimestamp = await attendanceSessionsDB.getByClassId(classId);
+        const lastUpdated = attendanceForTimestamp.length > 0
+            ? attendanceForTimestamp[0].createdAt
             : classInfo.created_at;
+
+        // Get attendance data to merge
+        const attendanceData = [];
+        if (attendanceForTimestamp.length > 0) {
+            for (const session of attendanceForTimestamp) {
+                const records = await attendanceRecordsDB.getBySessionId(session.id);
+                attendanceData.push({
+                    sessionId: session.id,
+                    date: session.attendanceDate,
+                    type: session.attendanceType,
+                    records: records.map(r => ({
+                        studentId: r.studentId,
+                        studentName: r.fullName,
+                        isPresent: r.isPresent
+                    }))
+                });
+            }
+        }
 
         res.json({
             success: true,
@@ -279,7 +334,8 @@ router.get('/:classId/excel', async (req, res) => {
             sheets: sheets,
             lastUpdated: lastUpdated,
             classId: classId,
-            className: classInfo.name
+            className: classInfo.name,
+            attendanceData: attendanceData  // ← NEW: Attendance data for merging
         });
 
     } catch (error) {

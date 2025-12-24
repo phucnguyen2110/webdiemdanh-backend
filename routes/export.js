@@ -8,8 +8,46 @@ import {
 } from '../database-supabase.js';
 import { exportAttendanceToExcel, generateExcelFileName } from '../utils/excelExporter.js';
 import { storageManager } from '../storageManager.js';
+import { mergeAttendanceIntoExcelWithFormat } from '../utils/excelMergerWithFormat.js';
 
 const router = express.Router();
+
+/**
+ * Format class name for export filename
+ * Ex: DiemDanh_Au_Nhi_1A.xlsx
+ */
+function formatExportFileName(className) {
+    // Remove special characters and normalize Vietnamese
+    const normalized = className
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Remove accents
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special chars
+        .trim()
+        .replace(/\s+/g, '_'); // Replace spaces with underscore
+
+    return `DiemDanh_${normalized}.xlsx`;
+}
+
+/**
+ * Format class name for original file download
+ * Ex: FileTong_Au_Nhi_1A.xlsx
+ */
+function formatOriginalFileName(className) {
+    // Remove special characters and normalize Vietnamese
+    const normalized = className
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Remove accents
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special chars
+        .trim()
+        .replace(/\s+/g, '_'); // Replace spaces with underscore
+
+    return `FileTong_${normalized}.xlsx`;
+}
+
 
 /**
  * GET /api/export/class/:classId
@@ -71,7 +109,7 @@ router.get('/class/:classId',
             const excelBuffer = exportAttendanceToExcel(classInfo, students, sessionsWithRecords);
 
             // Tao ten file
-            const fileName = generateExcelFileName(classInfo.name);
+            const fileName = formatExportFileName(classInfo.name);
 
             // Set headers va gui file
             res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -154,38 +192,46 @@ router.get('/class/:classId/original', async (req, res) => {
         // Lay tat ca sessions diem danh
         const sessions = await attendanceSessionsDB.getByClassId(classId);
 
-        // Ghi tung session vao Excel
+        // Download file from storage
+        let fileBuffer = await storageManager.downloadFile(excelFilePath);
+
+        // Merge attendance data into Excel
         if (sessions && sessions.length > 0) {
-            const { writeAttendanceWithFormat } = await import('../utils/excelWriterWithFormat.js');
-
+            // Deduplicate: Keep only latest session for each date+type combination
+            const sessionMap = new Map();
             for (const session of sessions) {
-                const records = await attendanceRecordsDB.getBySessionId(session.id);
+                const key = `${session.attendanceDate}_${session.attendanceType}`;
+                const existing = sessionMap.get(key);
 
-                // Ghi vao Excel cho tung thieu nhi
-                for (const record of records) {
-                    if (record.isPresent) {
-                        try {
-                            await writeAttendanceWithFormat(
-                                excelFilePath,
-                                record.fullName,
-                                session.attendanceDate,
-                                session.attendanceType,
-                                record.isPresent
-                            );
-                        } catch (err) {
-                            console.error(`Error writing attendance for ${record.fullName}:`, err.message);
-                            // Continue voi records khac
-                        }
-                    }
+                // Keep the session with latest createdAt
+                if (!existing || new Date(session.createdAt) > new Date(existing.createdAt)) {
+                    sessionMap.set(key, session);
                 }
             }
+
+            const uniqueSessions = Array.from(sessionMap.values());
+            console.log(`📊 Deduplicated: ${sessions.length} sessions → ${uniqueSessions.length} unique sessions`);
+
+            const attendanceSessions = [];
+            for (const session of uniqueSessions) {
+                const records = await attendanceRecordsDB.getBySessionId(session.id);
+                attendanceSessions.push({
+                    date: session.attendanceDate,
+                    type: session.attendanceType,
+                    records: records.map(r => ({
+                        studentName: r.fullName,
+                        isPresent: r.isPresent
+                    }))
+                });
+            }
+
+            // Merge attendance into Excel buffer (preserves formatting)
+            fileBuffer = await mergeAttendanceIntoExcelWithFormat(fileBuffer, attendanceSessions);
+            console.log(`✅ Merged ${attendanceSessions.length} sessions into Excel for download`);
         }
 
-        // Doc file (da cap nhat hoac goc neu khong co sessions)
-        const fileBuffer = await storageManager.downloadFile(excelFilePath);
-
         // Tao ten file
-        const fileName = `${classInfo.name}_Updated_${new Date().toISOString().split('T')[0]}.xlsx`;
+        const fileName = formatOriginalFileName(classInfo.name);
 
         // Set headers va gui file
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

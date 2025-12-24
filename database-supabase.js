@@ -202,8 +202,7 @@ export const attendanceSessionsDB = {
         let query = supabase
             .from('attendance_sessions_with_stats')
             .select('*')
-            .eq('class_id', classId)
-            .eq('attendance_method', 'manual');
+            .eq('class_id', classId);
 
         if (startDate) {
             query = query.gte('attendance_date', startDate);
@@ -222,6 +221,7 @@ export const attendanceSessionsDB = {
             id: session.id,
             attendanceDate: session.attendance_date,
             attendanceType: session.attendance_type,
+            attendanceMethod: session.attendance_method,
             createdAt: session.created_at,
             presentCount: session.present_count,
             totalCount: session.total_count

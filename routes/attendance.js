@@ -8,6 +8,7 @@ import {
 } from '../database-supabase.js';
 import { writeAttendanceWithFormat } from '../utils/excelWriterWithFormat.js';
 import { storageManager } from '../storageManager.js';
+import { validateAttendanceColumn } from '../utils/excelValidator.js';
 
 const router = express.Router();
 
@@ -46,11 +47,177 @@ router.post('/',
                 });
             }
 
-            // Tao session diem danh
-            const sessionId = await attendanceSessionsDB.create(classId, attendanceDate, attendanceType, attendanceMethod);
+            // Validate: Kiem tra tat ca students co thuoc class nay khong
+            const classStudents = await studentsDB.getByClassId(classId);
+            const validStudentIds = new Set(classStudents.map(s => s.id));
 
-            // Luu chi tiet diem danh
-            await attendanceRecordsDB.createBulk(sessionId, records);
+            const invalidStudents = records.filter(r => !validStudentIds.has(r.studentId));
+            if (invalidStudents.length > 0) {
+                console.error('❌ Invalid students:', invalidStudents.map(s => s.studentId));
+                return res.status(400).json({
+                    success: false,
+                    error: `Co ${invalidStudents.length} hoc sinh khong thuoc lop nay`,
+                    invalidStudentIds: invalidStudents.map(s => s.studentId)
+                });
+            }
+
+            // Validate: Kiem tra duplicate students
+            const studentIds = records.map(r => r.studentId);
+            const duplicates = studentIds.filter((id, index) => studentIds.indexOf(id) !== index);
+            if (duplicates.length > 0) {
+                console.error('❌ Duplicate students:', duplicates);
+                return res.status(400).json({
+                    success: false,
+                    error: 'Co hoc sinh bi trung lap trong danh sach diem danh',
+                    duplicateStudentIds: [...new Set(duplicates)]
+                });
+            }
+
+            console.log(`✅ Validated ${records.length} students for class ${classId}`);
+
+            // Validate: Kiem tra duplicate attendance (da diem danh truoc do)
+            const existingSessions = await attendanceSessionsDB.getByClassId(classId);
+            const duplicateSession = existingSessions.find(s =>
+                s.attendance_date === attendanceDate &&
+                s.attendance_type === attendanceType
+            );
+
+            if (duplicateSession) {
+                // Check if any students already marked
+                const existingRecords = await attendanceRecordsDB.getBySessionId(duplicateSession.id);
+                const existingStudentIds = existingRecords.map(r => r.student_id);
+                const alreadyMarked = records.filter(r => existingStudentIds.includes(r.studentId));
+
+                if (alreadyMarked.length > 0) {
+                    console.warn('⚠️ Students already marked:', alreadyMarked.map(s => s.studentId));
+
+                    // For QR: Skip silently and return success
+                    if (attendanceMethod === 'qr') {
+                        return res.json({
+                            success: true,
+                            message: 'Hoc sinh da duoc diem danh truoc do',
+                            sessionId: duplicateSession.id,
+                            skipped: alreadyMarked.length,
+                            alreadyMarkedStudents: alreadyMarked.map(s => ({
+                                studentId: s.studentId,
+                                studentName: students.find(st => st.id === s.studentId)?.full_name
+                            }))
+                        });
+                    }
+
+                    // For manual: Return error
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Co hoc sinh da duoc diem danh truoc do',
+                        alreadyMarkedStudents: alreadyMarked.map(s => ({
+                            studentId: s.studentId,
+                            studentName: students.find(st => st.id === s.studentId)?.full_name
+                        }))
+                    });
+                }
+            }
+
+            // Validate: Kiem tra date va attendance type co ton tai trong Excel file khong
+            if (classInfo.excel_file_path) {
+                // Download Excel file if needed (for Supabase storage)
+                let excelFilePath = classInfo.excel_file_path;
+
+                // If Supabase path, download to temp
+                if (excelFilePath.startsWith('supabase://')) {
+                    try {
+                        const fileBuffer = await storageManager.downloadFile(excelFilePath);
+                        const fs = await import('fs');
+                        const path = await import('path');
+                        const os = await import('os');
+
+                        // Create temp file
+                        const tempDir = os.tmpdir();
+                        const tempFileName = `temp_${classId}_${Date.now()}.xlsx`;
+                        excelFilePath = path.join(tempDir, tempFileName);
+
+                        fs.writeFileSync(excelFilePath, fileBuffer);
+                        console.log(`📥 Downloaded Excel to temp: ${excelFilePath}`);
+                    } catch (error) {
+                        console.error('Error downloading Excel for validation:', error);
+                        // Continue without validation if download fails
+                        excelFilePath = null;
+                    }
+                }
+
+                // Validate if we have a local file path
+                if (excelFilePath && !excelFilePath.startsWith('supabase://')) {
+                    const validation = validateAttendanceColumn(excelFilePath, attendanceDate, attendanceType);
+
+                    // Clean up temp file if created
+                    if (classInfo.excel_file_path.startsWith('supabase://')) {
+                        try {
+                            const fs = await import('fs');
+                            fs.unlinkSync(excelFilePath);
+                            console.log(`🗑️ Cleaned up temp file`);
+                        } catch (err) {
+                            console.warn('Could not delete temp file:', err.message);
+                        }
+                    }
+
+                    if (!validation.valid) {
+                        console.error('❌ Excel validation failed:', validation.message);
+                        return res.status(400).json({
+                            success: false,
+                            error: validation.message,
+                            details: validation.details
+                        });
+                    }
+
+                    console.log(`✅ Excel validation passed:`, validation.details);
+                }
+            }
+
+            // Tao hoac lay session diem danh
+            // Check again for existing session (to handle race conditions)
+            const existingSessionCheck = await attendanceSessionsDB.getByClassId(classId);
+            console.log(`🔍 Checking ${existingSessionCheck.length} existing sessions`);
+
+            let sessionId;
+            let existingSessionForReuse = existingSessionCheck.find(s => {
+                // Use camelCase (data is already converted in database-supabase.js)
+                const match = s.attendanceDate === attendanceDate && s.attendanceType === attendanceType;
+                console.log(`  Session ${s.id}: ${s.attendanceDate} - ${s.attendanceType} | Match: ${match}`);
+                return match;
+            });
+
+            if (existingSessionForReuse) {
+                // Reuse existing session
+                sessionId = existingSessionForReuse.id;
+                console.log(`♻️ Reusing existing session ${sessionId} for ${attendanceDate} - ${attendanceType}`);
+
+                // Check if students already marked in this session
+                const existingRecords = await attendanceRecordsDB.getBySessionId(sessionId);
+                const existingStudentIds = existingRecords.map(r => r.student_id);
+
+                // Filter out already marked students
+                const newRecords = records.filter(r => !existingStudentIds.includes(r.studentId));
+
+                if (newRecords.length === 0) {
+                    console.warn('⚠️ All students already marked, skipping');
+                    return res.json({
+                        success: true,
+                        message: 'Tat ca hoc sinh da duoc diem danh truoc do',
+                        sessionId: sessionId,
+                        skipped: records.length
+                    });
+                }
+
+                // Only save new students
+                await attendanceRecordsDB.createBulk(sessionId, newRecords);
+                console.log(`✅ Added ${newRecords.length} new students to existing session`);
+            } else {
+                // Create new session
+                sessionId = await attendanceSessionsDB.create(classId, attendanceDate, attendanceType, attendanceMethod);
+                console.log(`🆕 Created new session ${sessionId} for ${attendanceDate} - ${attendanceType}`);
+
+                // Luu chi tiet diem danh
+                await attendanceRecordsDB.createBulk(sessionId, records);
+            }
 
             // Ghi vao file Excel neu co
             const excelResults = [];
@@ -169,10 +336,21 @@ router.get('/history',
 
             const sessions = await attendanceSessionsDB.getByClassId(classId, startDate, endDate);
 
+            // Get total students in class
+            const students = await studentsDB.getByClassId(classId);
+            const totalStudents = students.length;
+
+            // Fix totalCount for each session
+            const sessionsWithCorrectTotal = sessions.map(session => ({
+                ...session,
+                totalCount: totalStudents,  // Always show total students in class
+                absentCount: totalStudents - session.presentCount  // Calculate absent
+            }));
+
             res.json({
                 success: true,
                 className: classInfo.name,
-                sessions: sessions
+                sessions: sessionsWithCorrectTotal
             });
 
         } catch (error) {
