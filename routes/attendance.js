@@ -7,7 +7,7 @@ import {
     studentsDB
 } from '../database-supabase.js';
 import { writeAttendanceWithFormat } from '../utils/excelWriterWithFormat.js';
-import { existsSync } from 'fs';
+import { storageManager } from '../storageManager.js';
 
 const router = express.Router();
 
@@ -56,9 +56,19 @@ router.post('/',
             const excelResults = [];
             try {
                 console.log('Excel file path:', classInfo.excel_file_path);
-                console.log('File exists:', classInfo.excel_file_path && existsSync(classInfo.excel_file_path));
 
-                if (classInfo.excel_file_path && existsSync(classInfo.excel_file_path)) {
+                // Check if file exists using storageManager
+                const fileExists = classInfo.excel_file_path
+                    ? await storageManager.fileExists(classInfo.excel_file_path)
+                    : false;
+                console.log('File exists:', fileExists);
+
+                // Only write to Excel in development with local files
+                const isDevelopment = process.env.NODE_ENV !== 'production';
+                const isLocalFile = classInfo.excel_file_path && !classInfo.excel_file_path.startsWith('supabase://');
+
+                if (fileExists && isDevelopment && isLocalFile) {
+                    console.log('✅ Writing attendance to local Excel file');
                     for (const record of records) {
                         // Chi ghi nhung em co mat
                         if (record.isPresent) {
@@ -94,7 +104,13 @@ router.post('/',
                         }
                     }
                 } else {
-                    console.log('Skipping Excel write: File path not available or file does not exist');
+                    if (!isDevelopment) {
+                        console.log('⚠️ Production: Excel write skipped (files on Supabase Storage)');
+                    } else if (!isLocalFile) {
+                        console.log('⚠️ Supabase file: Excel write skipped (read-only)');
+                    } else {
+                        console.log('⚠️ File not found or path not available');
+                    }
                 }
             } catch (excelError) {
                 console.error('Error writing to Excel:', excelError);

@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { classesDB, studentsDB } from '../database-supabase.js';
+import { classesDB, studentsDB, attendanceSessionsDB } from '../database-supabase.js';
 import { readExcelFile } from '../utils/excelReader.js';
 import { storageManager } from '../storageManager.js';
 import XLSX from 'xlsx';
@@ -267,10 +267,19 @@ router.get('/:classId/excel', async (req, res) => {
             fileName = path.basename(classInfo.excel_file_path);
         }
 
+        // Get latest attendance timestamp for cache invalidation
+        const latestAttendance = await attendanceSessionsDB.getByClassId(classId);
+        const lastUpdated = latestAttendance.length > 0
+            ? latestAttendance[0].createdAt
+            : classInfo.created_at;
+
         res.json({
             success: true,
             fileName: fileName,
-            sheets: sheets
+            sheets: sheets,
+            lastUpdated: lastUpdated,
+            classId: classId,
+            className: classInfo.name
         });
 
     } catch (error) {

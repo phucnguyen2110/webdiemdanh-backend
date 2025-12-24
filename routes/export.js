@@ -7,6 +7,7 @@ import {
     attendanceRecordsDB
 } from '../database-supabase.js';
 import { exportAttendanceToExcel, generateExcelFileName } from '../utils/excelExporter.js';
+import { storageManager } from '../storageManager.js';
 
 const router = express.Router();
 
@@ -142,7 +143,8 @@ router.get('/class/:classId/original', async (req, res) => {
         }
 
         // Kiem tra file co ton tai khong
-        if (!existsSync(excelFilePath)) {
+        const fileExists = await storageManager.fileExists(excelFilePath);
+        if (!fileExists) {
             return res.status(404).json({
                 success: false,
                 error: `File Excel khong ton tai tai: ${excelFilePath}`
@@ -180,7 +182,7 @@ router.get('/class/:classId/original', async (req, res) => {
         }
 
         // Doc file (da cap nhat hoac goc neu khong co sessions)
-        const fileBuffer = readFileSync(excelFilePath);
+        const fileBuffer = await storageManager.downloadFile(excelFilePath);
 
         // Tao ten file
         const fileName = `${classInfo.name}_Updated_${new Date().toISOString().split('T')[0]}.xlsx`;
