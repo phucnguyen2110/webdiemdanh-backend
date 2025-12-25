@@ -17,8 +17,12 @@ const router = express.Router();
  * Ex: DiemDanh_Au_Nhi_1A.xlsx
  */
 function formatExportFileName(className) {
+    if (!className || !className.trim()) {
+        return 'DiemDanh_Unknown.xlsx';
+    }
+
     // Remove special characters and normalize Vietnamese
-    const normalized = className
+    let normalized = className
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '') // Remove accents
         .replace(/đ/g, 'd')
@@ -26,6 +30,11 @@ function formatExportFileName(className) {
         .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special chars
         .trim()
         .replace(/\s+/g, '_'); // Replace spaces with underscore
+
+    // Fallback if normalization results in empty string
+    if (!normalized) {
+        normalized = className.replace(/[^\w\s]/g, '').trim().replace(/\s+/g, '_') || 'Unknown';
+    }
 
     return `DiemDanh_${normalized}.xlsx`;
 }
@@ -35,8 +44,12 @@ function formatExportFileName(className) {
  * Ex: FileTong_Au_Nhi_1A.xlsx
  */
 function formatOriginalFileName(className) {
+    if (!className || !className.trim()) {
+        return 'FileTong_Unknown.xlsx';
+    }
+
     // Remove special characters and normalize Vietnamese
-    const normalized = className
+    let normalized = className
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '') // Remove accents
         .replace(/đ/g, 'd')
@@ -44,6 +57,11 @@ function formatOriginalFileName(className) {
         .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special chars
         .trim()
         .replace(/\s+/g, '_'); // Replace spaces with underscore
+
+    // Fallback if normalization results in empty string
+    if (!normalized) {
+        normalized = className.replace(/[^\w\s]/g, '').trim().replace(/\s+/g, '_') || 'Unknown';
+    }
 
     return `FileTong_${normalized}.xlsx`;
 }
