@@ -66,7 +66,8 @@ app.use(cors({
             callback(new Error('Not allowed by CORS'));
         }
     },
-    credentials: true
+    credentials: true,
+    exposedHeaders: ['Content-Disposition'] // Allow frontend to read filename from header
 }));
 
 app.use(express.json());
