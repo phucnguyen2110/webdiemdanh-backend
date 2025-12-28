@@ -4,11 +4,13 @@ import {
     classesDB,
     studentsDB,
     attendanceSessionsDB,
-    attendanceRecordsDB
+    attendanceRecordsDB,
+    gradesDB
 } from '../database-supabase.js';
 import { exportAttendanceToExcel, generateExcelFileName } from '../utils/excelExporter.js';
 import { storageManager } from '../storageManager.js';
 import { mergeAttendanceIntoExcelWithFormat } from '../utils/excelMergerWithFormat.js';
+import { mergeGradesIntoExcelWithFormat } from '../utils/gradesMerger.js';
 
 const router = express.Router();
 
@@ -246,6 +248,40 @@ router.get('/class/:classId/original', async (req, res) => {
             // Merge attendance into Excel buffer (preserves formatting)
             fileBuffer = await mergeAttendanceIntoExcelWithFormat(fileBuffer, attendanceSessions);
             console.log(`✅ Merged ${attendanceSessions.length} sessions into Excel for download`);
+        }
+
+        // Merge grades data into Excel
+        const gradesHK1 = await gradesDB.getByClassId(classId, 'HK1');
+        const gradesHK2 = await gradesDB.getByClassId(classId, 'HK2');
+
+        const gradesSessions = [];
+        if (gradesHK1.length > 0) {
+            gradesSessions.push({
+                semester: 'HK1',
+                grades: gradesHK1.map(g => ({
+                    studentName: g.studentName,
+                    gradeM: g.gradeM,
+                    grade1T: g.grade1T,
+                    gradeThi: g.gradeThi
+                }))
+            });
+        }
+
+        if (gradesHK2.length > 0) {
+            gradesSessions.push({
+                semester: 'HK2',
+                grades: gradesHK2.map(g => ({
+                    studentName: g.studentName,
+                    gradeM: g.gradeM,
+                    grade1T: g.grade1T,
+                    gradeThi: g.gradeThi
+                }))
+            });
+        }
+
+        if (gradesSessions.length > 0) {
+            fileBuffer = await mergeGradesIntoExcelWithFormat(fileBuffer, gradesSessions);
+            console.log(`✅ Merged grades for ${gradesSessions.length} semesters into Excel`);
         }
 
         // Tao ten file

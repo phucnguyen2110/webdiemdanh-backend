@@ -232,6 +232,9 @@ export async function mergeAttendanceIntoExcelWithFormat(fileBuffer, attendanceS
                     const cell = worksheet.getRow(studentRow).getCell(dateColumn);
                     cell.value = 1;
                     modifiedCount++;
+
+                    // Log write result
+                    console.log(`  Write result: { success: true, message: 'Da ghi diem danh cho ${studentName} vao ${date} - ${type}', details: { sheet: '${worksheet.name}', row: ${studentRow}, column: ${dateColumn} } }`);
                 }
             }
         }

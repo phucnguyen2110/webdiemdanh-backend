@@ -3,10 +3,11 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { classesDB, studentsDB, attendanceSessionsDB, attendanceRecordsDB } from '../database-supabase.js';
+import { classesDB, studentsDB, attendanceSessionsDB, attendanceRecordsDB, gradesDB, usersDB } from '../database-supabase.js';
 import { readExcelFile } from '../utils/excelReader.js';
 import { storageManager } from '../storageManager.js';
 import { mergeAttendanceIntoExcel } from '../utils/excelMerger.js';
+import { parseAllGradesFromExcel } from '../utils/gradesParser.js';
 import XLSX from 'xlsx';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -107,10 +108,113 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         } else {
             // Create new class with file path
             classId = await classesDB.create(className.trim(), filePath);
+
+            // Auto-assign class to creator (if not admin)
+            const userId = req.headers['x-user-id'];
+            const userRole = req.headers['x-user-role'];
+
+            if (userId && userRole !== 'admin') {
+                try {
+                    const user = await usersDB.getById(parseInt(userId));
+                    if (user) {
+                        // Get current assigned classes
+                        const currentClasses = user.assignedClasses || [];
+
+                        // Add new class if not already assigned
+                        if (!currentClasses.includes(classId)) {
+                            const updatedClasses = [...currentClasses, classId];
+                            await usersDB.update(parseInt(userId), {
+                                assignedClasses: updatedClasses
+                            });
+                            console.log(`✅ Auto-assigned class ${classId} to user ${userId}`);
+                        }
+                    }
+                } catch (assignError) {
+                    console.error('Error auto-assigning class:', assignError);
+                    // Don't fail the upload if auto-assign fails
+                }
+            }
         }
 
         // Insert all students at once using bulk insert
         await studentsDB.createBulk(classId, students);
+
+        // Parse and import grades from Excel file
+        let gradesImported = { HK1: 0, HK2: 0 };
+        try {
+            console.log('📊 Parsing grades from Excel file...');
+            const allGrades = await parseAllGradesFromExcel(req.file.path);
+
+            // Get all students with their IDs
+            const insertedStudents = await studentsDB.getByClassId(classId);
+
+            // Import HK1 grades
+            if (allGrades.HK1.length > 0) {
+                const gradesHK1ToSave = [];
+
+                for (const grade of allGrades.HK1) {
+                    // Find student by name (normalize for matching)
+                    const student = insertedStudents.find(s => {
+                        const normalizedStudentName = s.fullName.toLowerCase().trim();
+                        const normalizedGradeName = grade.studentName.toLowerCase().trim();
+                        return normalizedStudentName === normalizedGradeName ||
+                            normalizedStudentName.includes(normalizedGradeName) ||
+                            normalizedGradeName.includes(normalizedStudentName);
+                    });
+
+                    if (student) {
+                        gradesHK1ToSave.push({
+                            studentId: student.id,
+                            studentName: student.fullName,
+                            gradeM: grade.gradeM,
+                            grade1T: grade.grade1T,
+                            gradeThi: grade.gradeThi
+                        });
+                    }
+                }
+
+                if (gradesHK1ToSave.length > 0) {
+                    await gradesDB.upsert(classId, 'HK1', gradesHK1ToSave);
+                    gradesImported.HK1 = gradesHK1ToSave.length;
+                    console.log(`✅ Imported ${gradesHK1ToSave.length} HK1 grades`);
+                }
+            }
+
+            // Import HK2 grades
+            if (allGrades.HK2.length > 0) {
+                const gradesHK2ToSave = [];
+
+                for (const grade of allGrades.HK2) {
+                    // Find student by name
+                    const student = insertedStudents.find(s => {
+                        const normalizedStudentName = s.fullName.toLowerCase().trim();
+                        const normalizedGradeName = grade.studentName.toLowerCase().trim();
+                        return normalizedStudentName === normalizedGradeName ||
+                            normalizedStudentName.includes(normalizedGradeName) ||
+                            normalizedGradeName.includes(normalizedStudentName);
+                    });
+
+                    if (student) {
+                        gradesHK2ToSave.push({
+                            studentId: student.id,
+                            studentName: student.fullName,
+                            gradeM: grade.gradeM,
+                            grade1T: grade.grade1T,
+                            gradeThi: grade.gradeThi
+                        });
+                    }
+                }
+
+                if (gradesHK2ToSave.length > 0) {
+                    await gradesDB.upsert(classId, 'HK2', gradesHK2ToSave);
+                    gradesImported.HK2 = gradesHK2ToSave.length;
+                    console.log(`✅ Imported ${gradesHK2ToSave.length} HK2 grades`);
+                }
+            }
+        } catch (gradesError) {
+            console.error('Error importing grades:', gradesError);
+            // Don't fail the whole upload if grades import fails
+        }
 
         const storageInfo = storageManager.getStorageInfo();
 
@@ -120,6 +224,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             classId: classId,
             className: className.trim(),
             studentsCount: students.length,
+            gradesImported: gradesImported,
             environment: isDevelopment ? 'Development' : 'Production',
             storage: {
                 type: storageInfo.storageType,

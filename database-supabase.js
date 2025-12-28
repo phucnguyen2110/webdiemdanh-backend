@@ -9,7 +9,7 @@ import { supabase } from './supabase.js';
 // CLASSES
 // =====================================================
 export const classesDB = {
-    // Tạo lớp mới
+    // Tao lop moi
     create: async (name, excelFilePath = null) => {
         const { data, error } = await supabase
             .from('classes')
@@ -21,18 +21,50 @@ export const classesDB = {
         return data.id;
     },
 
-    // Lấy tất cả lớp với số lượng học sinh
+    // Lay tat ca lop voi so luong hoc sinh (co kem ten giao vien)
     getAll: async () => {
-        const { data, error } = await supabase
+        // 1. Get classes
+        const { data: classes, error: classesError } = await supabase
             .from('classes_with_stats')
             .select('*')
             .order('created_at', { ascending: false });
 
-        if (error) throw error;
-        return data;
+        if (classesError) throw classesError;
+
+        try {
+            // 2. Get users to find teachers
+            const { data: users, error: usersError } = await supabase
+                .from('users')
+                .select('*'); // Select all to get full_name if/when it exists
+
+            if (usersError) {
+                console.error('Error fetching users for classes:', usersError);
+                return classes;
+            }
+
+            // 3. Map teachers to class
+            return classes.map(cls => {
+                // Find ALL users who have this class in assigned_classes
+                const teachers = users.filter(u =>
+                    u.assigned_classes &&
+                    Array.isArray(u.assigned_classes) &&
+                    u.assigned_classes.includes(cls.id)
+                );
+
+                const teacherNames = teachers.map(t => t.full_name || t.username).join(', ');
+
+                return {
+                    ...cls,
+                    teacher_name: teacherNames || null
+                };
+            });
+        } catch (err) {
+            console.error('Error in getAll classes:', err);
+            return classes;
+        }
     },
 
-    // Lấy lớp theo ID
+    // Lay lop theo ID
     getById: async (id) => {
         const { data, error } = await supabase
             .from('classes')
@@ -44,7 +76,7 @@ export const classesDB = {
         return data;
     },
 
-    // Cập nhật tên lớp
+    // Cap nhat ten lop
     update: async (id, name) => {
         const { error } = await supabase
             .from('classes')
@@ -55,7 +87,7 @@ export const classesDB = {
         return { changes: 1 };
     },
 
-    // Cập nhật file path
+    // Cap nhat file path
     updateFilePath: async (id, filePath) => {
         const { error } = await supabase
             .from('classes')
@@ -66,7 +98,7 @@ export const classesDB = {
         return { changes: 1 };
     },
 
-    // Xóa lớp
+    // Xoa lop
     delete: async (id) => {
         const { error } = await supabase
             .from('classes')
@@ -82,7 +114,7 @@ export const classesDB = {
 // STUDENTS
 // =====================================================
 export const studentsDB = {
-    // Tạo nhiều học sinh cùng lúc (bulk insert)
+    // Tao nhieu hoc sinh cung luc (bulk insert)
     createBulk: async (classId, students) => {
         const studentsData = students.map(student => ({
             class_id: classId,
@@ -105,7 +137,7 @@ export const studentsDB = {
         if (error) throw error;
     },
 
-    // Lấy tất cả học sinh trong lớp
+    // Lay tat ca hoc sinh trong lop
     getByClassId: async (classId) => {
         const { data, error } = await supabase
             .from('students')
@@ -144,7 +176,7 @@ export const studentsDB = {
         }));
     },
 
-    // Lấy thông tin một học sinh
+    // Lay thong tin mot hoc sinh
     getById: async (studentId) => {
         const { data, error } = await supabase
             .from('students')
@@ -164,7 +196,7 @@ export const studentsDB = {
         };
     },
 
-    // Xóa tất cả học sinh trong lớp
+    // Xoa tat ca hoc sinh trong lop
     deleteByClassId: async (classId) => {
         const { error } = await supabase
             .from('students')
@@ -180,7 +212,7 @@ export const studentsDB = {
 // ATTENDANCE SESSIONS
 // =====================================================
 export const attendanceSessionsDB = {
-    // Tạo buổi điểm danh mới
+    // Tao buoi diem danh moi
     create: async (classId, attendanceDate, attendanceType, attendanceMethod = 'manual') => {
         const { data, error } = await supabase
             .from('attendance_sessions')
@@ -197,7 +229,7 @@ export const attendanceSessionsDB = {
         return data.id;
     },
 
-    // Lấy lịch sử buổi điểm danh theo lớp
+    // Lay lich su buoi diem danh theo lop
     getByClassId: async (classId, startDate = null, endDate = null) => {
         let query = supabase
             .from('attendance_sessions_with_stats')
@@ -228,7 +260,7 @@ export const attendanceSessionsDB = {
         }));
     },
 
-    // Lấy chi tiết buổi điểm danh
+    // Lay chi tiet buoi diem danh
     getById: async (sessionId) => {
         const { data, error } = await supabase
             .from('attendance_sessions')
@@ -257,7 +289,7 @@ export const attendanceSessionsDB = {
         };
     },
 
-    // Xóa session
+    // Xoa session
     delete: async (sessionId) => {
         const { error } = await supabase
             .from('attendance_sessions')
@@ -273,7 +305,7 @@ export const attendanceSessionsDB = {
 // ATTENDANCE RECORDS
 // =====================================================
 export const attendanceRecordsDB = {
-    // Tạo nhiều bản ghi điểm danh cùng lúc
+    // Tao nhieu ban ghi diem danh cung luc
     createBulk: async (sessionId, records) => {
         const recordsData = records.map(record => ({
             session_id: sessionId,
@@ -288,7 +320,7 @@ export const attendanceRecordsDB = {
         if (error) throw error;
     },
 
-    // Lấy chi tiết điểm danh theo session
+    // Lay chi tiet diem danh theo session
     getBySessionId: async (sessionId) => {
         const { data, error } = await supabase
             .from('attendance_records')
@@ -318,6 +350,121 @@ export const attendanceRecordsDB = {
     }
 };
 
+// =====================================================
+// GRADES
+// =====================================================
+export const gradesDB = {
+    // Tao hoac cap nhat diem (UPSERT)
+    upsert: async (classId, semester, grades) => {
+        const gradesData = grades.map(grade => ({
+            class_id: classId,
+            student_id: grade.studentId,
+            student_name: grade.studentName,
+            semester: semester.toUpperCase(),
+            grade_m: grade.gradeM !== null && grade.gradeM !== undefined ? parseFloat(grade.gradeM) : null,
+            grade_1t: grade.grade1T !== null && grade.grade1T !== undefined ? parseFloat(grade.grade1T) : null,
+            grade_thi: grade.gradeThi !== null && grade.gradeThi !== undefined ? parseFloat(grade.gradeThi) : null
+        }));
+
+        const { data, error } = await supabase
+            .from('grades')
+            .upsert(gradesData, {
+                onConflict: 'class_id,student_id,semester',
+                ignoreDuplicates: false
+            })
+            .select('id');
+
+        if (error) throw error;
+        return data;
+    },
+
+    // Lay diem theo lop
+    getByClassId: async (classId, semester = null) => {
+        let query = supabase
+            .from('grades')
+            .select('*')
+            .eq('class_id', classId);
+
+        if (semester) {
+            query = query.eq('semester', semester.toUpperCase());
+        }
+
+        const { data, error } = await query.order('student_name', { ascending: true });
+
+        if (error) throw error;
+
+        return data.map(grade => ({
+            id: grade.id,
+            classId: grade.class_id,
+            studentId: grade.student_id,
+            studentName: grade.student_name,
+            semester: grade.semester,
+            gradeM: grade.grade_m,
+            grade1T: grade.grade_1t,
+            gradeThi: grade.grade_thi,
+            createdAt: grade.created_at,
+            updatedAt: grade.updated_at
+        }));
+    },
+
+    // Lay diem theo hoc sinh
+    getByStudentId: async (studentId, semester = null) => {
+        let query = supabase
+            .from('grades')
+            .select('*')
+            .eq('student_id', studentId);
+
+        if (semester) {
+            query = query.eq('semester', semester.toUpperCase());
+        }
+
+        const { data, error } = await query.order('semester', { ascending: true });
+
+        if (error) throw error;
+
+        return data.map(grade => ({
+            id: grade.id,
+            classId: grade.class_id,
+            studentId: grade.student_id,
+            studentName: grade.student_name,
+            semester: grade.semester,
+            gradeM: grade.grade_m,
+            grade1T: grade.grade_1t,
+            gradeThi: grade.grade_thi,
+            createdAt: grade.created_at,
+            updatedAt: grade.updated_at
+        }));
+    },
+
+    // Xoa diem theo ID
+    delete: async (gradeId) => {
+        const { error } = await supabase
+            .from('grades')
+            .delete()
+            .eq('id', gradeId);
+
+        if (error) throw error;
+        return { changes: 1 };
+    },
+
+    // Xoa tat ca diem cua lop
+    deleteByClassId: async (classId, semester = null) => {
+        let query = supabase
+            .from('grades')
+            .delete()
+            .eq('class_id', classId);
+
+        if (semester) {
+            query = query.eq('semester', semester.toUpperCase());
+        }
+
+        const { error } = await query;
+
+        if (error) throw error;
+        return { changes: 1 };
+    }
+};
+
 /**
  * Initialize database (not needed for Supabase, but kept for compatibility)
  */
@@ -327,10 +474,132 @@ export async function initializeDatabase() {
     // This function is kept for compatibility with existing code
 }
 
+// =====================================================
+// USERS (Authentication)
+// =====================================================
+// =====================================================
+// USERS (Authentication)
+// =====================================================
+export const usersDB = {
+    // Tim user theo username (for login)
+    findByUsername: async (username) => {
+        const { data, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('username', username)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') return null; // Not found
+            throw error;
+        }
+        return data;
+    },
+
+    // Lay tat ca users (admin only, khong tra ve password)
+    getAll: async () => {
+        const { data, error } = await supabase
+            .from('users')
+            .select('id, username, full_name, role, assigned_classes, created_at, updated_at')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        return data.map(user => ({
+            id: user.id,
+            username: user.username,
+            fullName: user.full_name,
+            role: user.role,
+            assignedClasses: user.assigned_classes,
+            createdAt: user.created_at,
+            updatedAt: user.updated_at
+        }));
+    },
+
+    // Lay user theo ID (khong tra ve password)
+    getById: async (id) => {
+        const { data, error } = await supabase
+            .from('users')
+            .select('id, username, full_name, role, assigned_classes, created_at, updated_at')
+            .eq('id', id)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') return null;
+            throw error;
+        }
+
+        return {
+            id: data.id,
+            username: data.username,
+            fullName: data.full_name,
+            role: data.role,
+            assignedClasses: data.assigned_classes,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+        };
+    },
+
+    // Tao user moi
+    create: async (username, hashedPassword, role, assignedClasses = null, fullName = null) => {
+        const { data, error } = await supabase
+            .from('users')
+            .insert({
+                username,
+                password: hashedPassword,
+                role,
+                assigned_classes: assignedClasses,
+                full_name: fullName
+            })
+            .select('id, username, full_name, role, assigned_classes')
+            .single();
+
+        if (error) throw error;
+
+        return {
+            id: data.id,
+            username: data.username,
+            fullName: data.full_name,
+            role: data.role,
+            assignedClasses: data.assigned_classes
+        };
+    },
+
+    // Cap nhat user
+    update: async (id, updates) => {
+        const updateData = {};
+
+        if (updates.password) updateData.password = updates.password;
+        if (updates.role) updateData.role = updates.role;
+        if (updates.fullName !== undefined) updateData.full_name = updates.fullName;
+        if (updates.assignedClasses !== undefined) updateData.assigned_classes = updates.assignedClasses;
+
+        const { error } = await supabase
+            .from('users')
+            .update(updateData)
+            .eq('id', id);
+
+        if (error) throw error;
+        return { changes: 1 };
+    },
+
+    // Xoa user
+    delete: async (id) => {
+        const { error } = await supabase
+            .from('users')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+        return { changes: 1 };
+    }
+};
+
 export default {
     classesDB,
     studentsDB,
     attendanceSessionsDB,
     attendanceRecordsDB,
+    gradesDB,
+    usersDB,
     initializeDatabase
 };

@@ -12,6 +12,9 @@ import classesRouter from './routes/classes.js';
 import attendanceRouter from './routes/attendance.js';
 import exportRouter from './routes/export.js';
 import studentsRouter from './routes/students.js';
+import gradesRouter from './routes/grades.js';
+import authRouter from './routes/auth.js';
+import usersRouter from './routes/users.js';
 
 // Load environment variables
 dotenv.config();
@@ -19,18 +22,19 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Khá»Ÿi táº¡o Express app
+
+// Khoi tao Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Tạo thư mục uploads nếu chưa tồn tại
+// Tao thu muc uploads neu chua ton tai
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
     console.log('✅ Created uploads directory:', uploadsDir);
 }
 
-// Khởi tạo database
+// Khoi tao database
 initializeDatabase();
 
 // Test Supabase connection
@@ -84,12 +88,15 @@ app.use('/api/classes', classesRouter);
 app.use('/api/attendance', attendanceRouter);
 app.use('/api/export', exportRouter);
 app.use('/api/students', studentsRouter);
+app.use('/api/grades', gradesRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/users', usersRouter);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
     res.json({
         success: true,
-        message: 'Server Ä‘ang hoáº¡t Ä‘á»™ng',
+        message: 'Server dang hoat dong',
         timestamp: new Date().toISOString()
     });
 });
@@ -98,12 +105,14 @@ app.get('/api/health', (req, res) => {
 app.get('/', (req, res) => {
     res.json({
         success: true,
-        message: 'API Há»‡ thá»‘ng Äiá»ƒm Danh Thiáº¿u Nhi GiÃ¡o LÃ½',
+        message: 'API Quan Ly Thieu Nhi',
         version: '1.0.0',
         endpoints: {
             classes: '/api/classes',
             attendance: '/api/attendance',
             export: '/api/export',
+            students: '/api/students',
+            grades: '/api/grades',
             health: '/api/health'
         }
     });
@@ -113,7 +122,7 @@ app.get('/', (req, res) => {
 app.use((req, res) => {
     res.status(404).json({
         success: false,
-        error: 'Endpoint khÃ´ng tá»“n táº¡i'
+        error: 'Endpoint khong ton tai'
     });
 });
 
@@ -122,7 +131,7 @@ app.use((err, req, res, next) => {
     console.error('Error:', err);
     res.status(500).json({
         success: false,
-        error: 'Lá»—i server',
+        error: 'Loi server',
         message: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
 });
