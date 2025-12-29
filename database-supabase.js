@@ -347,6 +347,28 @@ export const attendanceRecordsDB = {
             baptismalName: record.students.baptismal_name,
             fullName: record.students.full_name
         }));
+    },
+
+    // Xoa record diem danh cua mot hoc sinh trong session
+    delete: async (sessionId, studentId) => {
+        const { error } = await supabase
+            .from('attendance_records')
+            .delete()
+            .match({ session_id: sessionId, student_id: studentId });
+
+        if (error) throw error;
+        return { changes: 1 };
+    },
+
+    // Cap nhat trang thai diem danh cua mot hoc sinh
+    update: async (sessionId, studentId, isPresent) => {
+        const { error } = await supabase
+            .from('attendance_records')
+            .update({ is_present: isPresent })
+            .match({ session_id: sessionId, student_id: studentId });
+
+        if (error) throw error;
+        return { changes: 1 };
     }
 };
 
@@ -568,6 +590,7 @@ export const usersDB = {
     update: async (id, updates) => {
         const updateData = {};
 
+        if (updates.username) updateData.username = updates.username;
         if (updates.password) updateData.password = updates.password;
         if (updates.role) updateData.role = updates.role;
         if (updates.fullName !== undefined) updateData.full_name = updates.fullName;

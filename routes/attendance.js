@@ -438,4 +438,40 @@ router.delete('/session/:sessionId', async (req, res) => {
     }
 });
 
+
+/**
+ * DELETE /api/attendance/session/:sessionId/student/:studentId
+ * Xoa diem danh cua mot hoc sinh trong buoi
+ */
+router.delete('/session/:sessionId/student/:studentId', async (req, res) => {
+    try {
+        const { sessionId, studentId } = req.params;
+
+        // Kiem tra session co ton tai khong
+        const session = await attendanceSessionsDB.getById(sessionId);
+        if (!session) {
+            return res.status(404).json({
+                success: false,
+                error: 'Khong tim thay buoi diem danh'
+            });
+        }
+
+        // Update record diem danh -> isPresent = false
+        // Nguoi dung yeu cau: "cac em thieu nhi do van ton tai voi isPresent bang false"
+        await attendanceRecordsDB.update(sessionId, studentId, false);
+
+        res.json({
+            success: true,
+            message: 'Da cap nhat trang thai vang mat cho hoc sinh'
+        });
+
+    } catch (error) {
+        console.error('Error deleting student attendance:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Loi khi xoa diem danh cua hoc sinh'
+        });
+    }
+});
+
 export default router;

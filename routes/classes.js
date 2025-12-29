@@ -71,6 +71,15 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             return res.status(400).json({ success: false, error: 'No students found in Excel file' });
         }
 
+        // Parse grades early before file upload (which might delete the local file in PROD)
+        let allGrades = { HK1: [], HK2: [] };
+        try {
+            allGrades = await parseAllGradesFromExcel(req.file.path);
+            console.log(`📊 Early parse: ${allGrades.HK1.length} HK1 grades, ${allGrades.HK2.length} HK2 grades`);
+        } catch (error) {
+            console.error('Error parsing grades early:', error);
+        }
+
         // Check if class already exists
         const existingClasses = await classesDB.getAll();
         const existingClass = existingClasses.find(c => c.name === className.trim());
@@ -142,8 +151,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         // Parse and import grades from Excel file
         let gradesImported = { HK1: 0, HK2: 0 };
         try {
-            console.log('📊 Parsing grades from Excel file...');
-            const allGrades = await parseAllGradesFromExcel(req.file.path);
+            console.log('📊 Importing parsed grades...');
+            // Grades were parsed early (allGrades variable from outer scope)
 
             // Get all students with their IDs
             const insertedStudents = await studentsDB.getByClassId(classId);
