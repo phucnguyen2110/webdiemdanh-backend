@@ -15,6 +15,7 @@ import studentsRouter from './routes/students.js';
 import gradesRouter from './routes/grades.js';
 import authRouter from './routes/auth.js';
 import usersRouter from './routes/users.js';
+import syncErrorsRouter from './routes/syncErrors.js';
 
 // Load environment variables
 dotenv.config();
@@ -91,6 +92,7 @@ app.use('/api/students', studentsRouter);
 app.use('/api/grades', gradesRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/users', usersRouter);
+app.use('/api/sync-errors', syncErrorsRouter);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -113,6 +115,8 @@ app.get('/', (req, res) => {
             export: '/api/export',
             students: '/api/students',
             grades: '/api/grades',
+            grades: '/api/grades',
+            syncErrors: '/api/sync-errors',
             health: '/api/health'
         }
     });
@@ -150,6 +154,7 @@ app.listen(PORT, () => {
     console.log(`   POST   /api/attendance`);
     console.log(`   GET    /api/attendance/history`);
     console.log(`   GET    /api/attendance/session/:sessionId`);
+    console.log(`   POST   /api/sync-errors`);
     console.log(`   GET    /api/export/class/:classId`);
     console.log('='.repeat(50));
 });

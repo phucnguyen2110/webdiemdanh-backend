@@ -617,6 +617,262 @@ export const usersDB = {
     }
 };
 
+// =====================================================
+// SYNC ERROR LOGS
+// =====================================================
+export const syncErrorsDB = {
+    // Tao log moi
+    create: async (data) => {
+        // Process attendance records if provided
+        let attendanceRecords = null;
+        let presentCount = 0;
+
+        if (data.records && Array.isArray(data.records)) {
+            const recordsWithDetails = [];
+
+            for (const record of data.records) {
+                if (record.isPresent) {
+                    // Fetch student details
+                    const { data: student, error: studentError } = await supabase
+                        .from('students')
+                        .select('id, baptismal_name, full_name')
+                        .eq('id', record.studentId)
+                        .single();
+
+                    if (!studentError && student) {
+                        const studentName = student.baptismal_name
+                            ? `${student.baptismal_name} ${student.full_name}`
+                            : student.full_name;
+
+                        recordsWithDetails.push({
+                            studentId: student.id,
+                            studentName: studentName,
+                            isPresent: true
+                        });
+                        presentCount++;
+                    }
+                }
+            }
+
+            if (recordsWithDetails.length > 0) {
+                attendanceRecords = recordsWithDetails;
+            }
+        }
+
+        const { error, data: result } = await supabase
+            .from('sync_error_logs')
+            .insert({
+                user_id: data.userId,
+                username: data.username,
+                class_id: data.classId || null,
+                attendance_date: data.attendanceDate || null,
+                attendance_type: data.attendanceType || null,
+                attendance_id: data.attendanceId || null,
+                error_message: data.error,
+                user_agent: data.userAgent || null,
+                is_online: data.online || false,
+                attendance_records: attendanceRecords,
+                present_count: presentCount
+            })
+            .select('id')
+            .single();
+
+        if (error) throw error;
+        return result.id;
+    },
+
+    // Lay danh sach error logs (filter + pagination)
+    getAll: async ({ userId, classId, resolved, startDate, endDate, limit, offset }) => {
+        let query = supabase
+            .from('sync_error_logs')
+            .select(`
+                *,
+                classes (
+                    name
+                )
+            `, { count: 'exact' });
+
+        if (userId) query = query.eq('user_id', userId);
+        if (classId) query = query.eq('class_id', classId);
+        if (resolved !== undefined) query = query.eq('resolved', resolved);
+        if (startDate) query = query.gte('created_at', startDate);
+        if (endDate) query = query.lte('created_at', endDate);
+
+        const { data, error, count } = await query
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+
+        if (error) throw error;
+
+        return {
+            logs: data.map(log => ({
+                id: log.id,
+                userId: log.user_id,
+                username: log.username,
+                classId: log.class_id,
+                className: log.classes ? log.classes.name : null,
+                attendanceDate: log.attendance_date,
+                attendanceType: log.attendance_type,
+                attendanceId: log.attendance_id,
+                error: log.error_message,
+                userAgent: log.user_agent,
+                isOnline: log.is_online,
+                createdAt: log.created_at,
+                resolved: log.resolved,
+                resolvedAt: log.resolved_at,
+                resolvedBy: log.resolved_by,
+                notes: log.notes,
+                attendanceRecords: log.attendance_records || [],
+                presentCount: log.present_count || 0
+            })),
+            total: count
+        };
+    },
+
+    // Lay thong ke
+    getStats: async (period) => {
+        // Note: Complex aggregation is better done with RPC or raw SQL in Supabase.
+        // For simplicity with JS client and no RPC handy, we might fetch simplified data or do multiple count queries.
+        // Or better, let's try to use raw SQL via RPC if available, but here we'll stick to multiple queries for safety/compatibility.
+
+        const getCount = async (filter) => {
+            let query = supabase.from('sync_error_logs').select('*', { count: 'exact', head: true });
+            if (filter) filter(query);
+            const { count, error } = await query;
+            if (error) throw error;
+            return count;
+        };
+
+        const now = new Date();
+        let dateLimit;
+
+        switch (period) {
+            case '24h': dateLimit = new Date(now - 24 * 60 * 60 * 1000); break;
+            case '7d': dateLimit = new Date(now - 7 * 24 * 60 * 60 * 1000); break;
+            case '30d': dateLimit = new Date(now - 30 * 24 * 60 * 60 * 1000); break;
+            default: dateLimit = null; // 'all'
+        }
+
+        const dateFilter = (q) => { if (dateLimit) q.gte('created_at', dateLimit.toISOString()); };
+
+        const [total, resolved, unresolved] = await Promise.all([
+            getCount(q => dateFilter(q)),
+            getCount(q => { dateFilter(q); q.eq('resolved', true); }),
+            getCount(q => { dateFilter(q); q.eq('resolved', false); })
+        ]);
+
+        // Helper for group by counts (client-side aggregation for small datasets, 
+        // normally risky for big data but acceptable for error logs usually)
+        // For better performance, create Views or RPCs in Supabase.
+        const { data: logs, error } = await supabase
+            .from('sync_error_logs')
+            .select('username, class_id, error_message')
+            .gte('created_at', dateLimit ? dateLimit.toISOString() : '1970-01-01');
+
+        if (error) throw error;
+
+        const byUser = {};
+        const byClass = {};
+        const byErrorType = {};
+
+        logs.forEach(log => {
+            byUser[log.username] = (byUser[log.username] || 0) + 1;
+            if (log.class_id) byClass[log.class_id] = (byClass[log.class_id] || 0) + 1;
+            byErrorType[log.error_message] = (byErrorType[log.error_message] || 0) + 1;
+        });
+
+        // Sort and limit top 10
+        const sortObj = (obj) => Object.entries(obj)
+            .sort(([, a], [, b]) => b - a)
+            .slice(0, 10)
+            .reduce((r, [k, v]) => ({ ...r, [k]: v }), {});
+
+        return {
+            total,
+            resolved,
+            unresolved,
+            byUser: sortObj(byUser),
+            byClass: sortObj(byClass),
+            byErrorType: sortObj(byErrorType)
+        };
+    },
+
+    // Resolve error
+    resolve: async (id, resolveData) => {
+        const { error } = await supabase
+            .from('sync_error_logs')
+            .update({
+                resolved: true,
+                resolved_at: new Date().toISOString(),
+                resolved_by: resolveData.resolvedBy,
+                notes: resolveData.notes
+            })
+            .eq('id', id);
+
+        if (error) throw error;
+        return { success: true };
+    },
+
+    // Xoa log
+    delete: async (id) => {
+        const { error } = await supabase
+            .from('sync_error_logs')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+        return { success: true };
+    },
+
+    // Xoa nhieu log
+    deleteBulk: async ({ ids, olderThan, resolved }) => {
+        let query = supabase.from('sync_error_logs').delete();
+
+        if (ids && ids.length > 0) {
+            query = query.in('id', ids);
+        } else if (olderThan) {
+            query = query.lt('created_at', olderThan);
+            if (resolved) {
+                query = query.eq('resolved', true);
+            }
+        } else {
+            throw new Error('Invalid delete conditions');
+        }
+
+        const { error, count } = await query; // count won't be returned by delete normally in Supabase JS client v2 unless select is used? 
+        // Actually delete doesn't return count by default easily in valid JS syntax without select.
+        // But for minimal viable implementation:
+        if (error) throw error;
+        return { success: true };
+    },
+
+    // Lay danh sach attendanceId da duoc resolve cho user
+    getResolvedAttendanceIds: async (userId, since) => {
+        let query = supabase
+            .from('sync_error_logs')
+            .select('attendance_id')
+            .eq('user_id', userId)
+            .eq('resolved', true)
+            .not('attendance_id', 'is', null);
+
+        if (since) {
+            query = query.gt('resolved_at', since);
+        }
+
+        const { data, error } = await query;
+
+        if (error) throw error;
+
+        // Extract unique attendance IDs
+        const uniqueIds = [...new Set(data.map(log => log.attendance_id))];
+
+        return {
+            resolvedAttendanceIds: uniqueIds,
+            count: uniqueIds.length
+        };
+    }
+};
+
 export default {
     classesDB,
     studentsDB,
@@ -624,5 +880,6 @@ export default {
     attendanceRecordsDB,
     gradesDB,
     usersDB,
+    syncErrorsDB,
     initializeDatabase
 };
