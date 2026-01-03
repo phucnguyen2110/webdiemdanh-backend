@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { classesDB, studentsDB, attendanceSessionsDB, attendanceRecordsDB, gradesDB, usersDB } from '../database-supabase.js';
+import { classesDB, studentsDB, attendanceSessionsDB, attendanceRecordsDB, gradesDB, usersDB, syncErrorsDB } from '../database-supabase.js';
 import { readExcelFile } from '../utils/excelReader.js';
 import { storageManager } from '../storageManager.js';
 import { mergeAttendanceIntoExcel } from '../utils/excelMerger.js';
@@ -304,9 +304,22 @@ router.delete('/:classId', async (req, res) => {
             }
         }
 
-        // Delete class from database
+        // Clean up related data BEFORE deleting the class to ensure consistency
+        // 1. Remove from users' assignedClasses
+        await usersDB.removeAssignedClass(classId);
+        console.log(`Removed class ${classId} from users' assignedClasses`);
+
+        // 2. Delete related data (manually to be safe, though cascade might handle some)
+        await studentsDB.deleteByClassId(classId);
+        await gradesDB.deleteByClassId(classId);
+        await attendanceSessionsDB.deleteByClassId(classId);
+        await syncErrorsDB.deleteByClassId(classId);
+        console.log(`Deleted related data for class ${classId}`);
+
+        // 3. Delete class from database
         await classesDB.delete(classId);
-        res.json({ success: true, message: 'Class deleted successfully' });
+
+        res.json({ success: true, message: 'Class deleted successfully and references cleaned up' });
     } catch (error) {
         console.error('Error deleting class:', error);
         res.status(500).json({ success: false, error: 'Failed to delete class' });

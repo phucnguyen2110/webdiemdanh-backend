@@ -52,13 +52,66 @@ router.post('/',
             const validStudentIds = new Set(classStudents.map(s => s.id));
 
             const invalidStudents = records.filter(r => !validStudentIds.has(r.studentId));
+
+            // Auto-correct logic for students from invalid classes (e.g. offline data from DEV class)
             if (invalidStudents.length > 0) {
-                console.error('❌ Invalid students:', invalidStudents.map(s => s.studentId));
-                return res.status(400).json({
-                    success: false,
-                    error: `Co ${invalidStudents.length} hoc sinh khong thuoc lop nay`,
-                    invalidStudentIds: invalidStudents.map(s => s.studentId)
-                });
+                console.warn(`⚠️ Found ${invalidStudents.length} invalid student IDs. Attempting to auto-correct...`);
+
+                const stillInvalid = [];
+
+                for (const invalidRecord of invalidStudents) {
+                    try {
+                        // Get info of the invalid student (from the OLD/Wrong class)
+                        // This assumes the ID actually exists in the DB somewhere
+                        let oldStudent;
+                        try {
+                            oldStudent = await studentsDB.getById(invalidRecord.studentId);
+                        } catch (e) {
+                            // Student not found at all
+                            console.warn(`Student ID ${invalidRecord.studentId} not found in DB`);
+                            stillInvalid.push(invalidRecord);
+                            continue;
+                        }
+
+                        // Try to find match in NEW/Target class (classStudents)
+                        // Match by Custom ID (preferred) or Name
+                        let match = null;
+
+                        if (oldStudent.studentId) {
+                            match = classStudents.find(s => s.studentId === oldStudent.studentId);
+                        }
+
+                        // Fallback to Name + DOB (or just Name if strict)
+                        if (!match) {
+                            console.log(`  No CustomID match for ${oldStudent.fullName}, trying fuzzy match...`);
+                            match = classStudents.find(s =>
+                                s.fullName.toLowerCase().trim() === oldStudent.fullName.toLowerCase().trim() &&
+                                (!oldStudent.dateOfBirth || s.dateOfBirth === oldStudent.dateOfBirth)
+                            );
+                        }
+
+                        if (match) {
+                            // Update the record in 'records' array (shared reference)
+                            console.log(`✅ Auto-corrected Student: "${oldStudent.fullName}" (${invalidRecord.studentId} -> ${match.id})`);
+                            invalidRecord.studentId = match.id;
+                        } else {
+                            console.error(`❌ Could not auto-correct Student: ${oldStudent.fullName} (ID: ${invalidRecord.studentId})`);
+                            stillInvalid.push(invalidRecord);
+                        }
+                    } catch (err) {
+                        console.error(`Error checking student ${invalidRecord.studentId}:`, err);
+                        stillInvalid.push(invalidRecord);
+                    }
+                }
+
+                if (stillInvalid.length > 0) {
+                    console.error('❌ Invalid students (after auto-correct):', stillInvalid.map(s => s.studentId));
+                    return res.status(400).json({
+                        success: false,
+                        error: `Co ${stillInvalid.length} hoc sinh khong thuoc lop nay (khong the tu dong sua)`,
+                        invalidStudentIds: stillInvalid.map(s => s.studentId)
+                    });
+                }
             }
 
             // Validate: Kiem tra duplicate students
@@ -380,8 +433,29 @@ router.get('/session/:sessionId', async (req, res) => {
             });
         }
 
-        // Lay chi tiet diem danh
-        const records = await attendanceRecordsDB.getBySessionId(sessionId);
+        // Lay tat ca hoc sinh trong lop
+        const allStudents = await studentsDB.getByClassId(session.classId);
+
+        // Lay chi tiet diem danh (cac record da co)
+        const existingRecords = await attendanceRecordsDB.getBySessionId(sessionId);
+
+        // Merge records with all students to ensure everyone is listed
+        const fullRecords = allStudents.map(student => {
+            const record = existingRecords.find(r => r.studentId === student.id);
+            if (record) {
+                return record;
+            }
+            // Neu chua co record (vi du: QR code chi luu nguoi di hoc), tra ve record ao voi isPresent = false
+            return {
+                id: null, // No record ID yet
+                studentId: student.id,
+                isPresent: false,
+                stt: student.stt,
+                baptismalName: student.baptismalName,
+                fullName: student.fullName,
+                student_id: student.studentId // Ensure custom ID is passed if available
+            };
+        });
 
         res.json({
             success: true,
@@ -392,7 +466,7 @@ router.get('/session/:sessionId', async (req, res) => {
                 className: session.className,
                 classId: session.classId
             },
-            records: records
+            records: fullRecords
         });
 
     } catch (error) {
@@ -470,6 +544,51 @@ router.delete('/session/:sessionId/student/:studentId', async (req, res) => {
         res.status(500).json({
             success: false,
             error: 'Loi khi xoa diem danh cua hoc sinh'
+        });
+    }
+});
+
+/**
+ * PUT /api/attendance/session/:sessionId/student/:studentId
+ * Cap nhat trang thai diem danh (Vang -> Co mat hoac nguoc lai)
+ * Body: { isPresent: boolean }
+ */
+router.put('/session/:sessionId/student/:studentId', async (req, res) => {
+    try {
+        const { sessionId, studentId } = req.params;
+        const { isPresent } = req.body;
+
+        // Default isPresent to true if not provided (assume "marking as present")
+        const newStatus = isPresent !== undefined ? isPresent : true;
+
+        // Kiem tra session
+        const session = await attendanceSessionsDB.getById(sessionId);
+        if (!session) {
+            return res.status(404).json({
+                success: false,
+                error: 'Khong tim thay buoi diem danh'
+            });
+        }
+
+        // Update record
+        // Ham nay se update record da ton tai (isPresent: false -> true)
+        await attendanceRecordsDB.update(sessionId, studentId, newStatus);
+
+        // Neu record chua ton tai thi sao? (Truong hop chua tung diem danh)
+        // Hien tai DB layer chi ho tro update cho record da ton tai. 
+        // Neu muon ho tro ca truong hop chua co record (Upsert), can modify DB layer.
+        // Tuy nhien voi yeu cau "chuyen trang thai", thuong la record da co.
+
+        res.json({
+            success: true,
+            message: `Da cap nhat trang thai thanh ${newStatus ? 'CO MAT' : 'VANG MAT'}`
+        });
+
+    } catch (error) {
+        console.error('Error updating student status:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Loi khi cap nhat trang thai'
         });
     }
 });

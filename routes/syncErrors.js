@@ -178,13 +178,17 @@ router.get('/stats', authenticate, requireAdmin, async (req, res) => {
 router.patch('/:id/resolve', authenticate, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
+        const { notes } = req.body;
 
-        // Delete the error instead of marking as resolved
-        await syncErrorsDB.delete(id);
+        // Mark as resolved (don't delete, so client can query /my-resolved)
+        await syncErrorsDB.resolve(id, {
+            resolvedBy: req.user.id,
+            notes: notes || 'Resolved by admin'
+        });
 
         res.json({
             success: true,
-            message: 'Error resolved and deleted successfully'
+            message: 'Error marked as resolved'
         });
     } catch (error) {
         console.error('Error resolving error:', error);

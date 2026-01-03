@@ -180,7 +180,7 @@ export const studentsDB = {
     getById: async (studentId) => {
         const { data, error } = await supabase
             .from('students')
-            .select('id, class_id, stt, baptismal_name, full_name, date_of_birth')
+            .select('id, class_id, stt, student_id, baptismal_name, full_name, date_of_birth')
             .eq('id', studentId)
             .single();
 
@@ -190,6 +190,7 @@ export const studentsDB = {
             id: data.id,
             classId: data.class_id,
             stt: data.stt,
+            studentId: data.student_id,
             baptismalName: data.baptismal_name,
             fullName: data.full_name,
             dateOfBirth: data.date_of_birth
@@ -298,6 +299,17 @@ export const attendanceSessionsDB = {
 
         if (error) throw error;
         return { changes: 1 };
+    },
+
+    // Xoa tat ca session cua lop
+    deleteByClassId: async (classId) => {
+        const { error } = await supabase
+            .from('attendance_sessions')
+            .delete()
+            .eq('class_id', classId);
+
+        if (error) throw error;
+        return { changes: 1 };
     }
 };
 
@@ -362,13 +374,37 @@ export const attendanceRecordsDB = {
 
     // Cap nhat trang thai diem danh cua mot hoc sinh
     update: async (sessionId, studentId, isPresent) => {
+        // Use upsert to handle both update and insert (if record doesn't exist)
         const { error } = await supabase
             .from('attendance_records')
-            .update({ is_present: isPresent })
-            .match({ session_id: sessionId, student_id: studentId });
+            .upsert({
+                session_id: sessionId,
+                student_id: studentId,
+                is_present: isPresent
+            }, {
+                onConflict: 'session_id, student_id'
+            });
 
         if (error) throw error;
         return { changes: 1 };
+    },
+
+    // Upsert (Insert or Update) record
+    upsert: async (sessionId, studentId, isPresent) => {
+        const { data, error } = await supabase
+            .from('attendance_records')
+            .upsert({
+                session_id: sessionId,
+                student_id: studentId,
+                is_present: isPresent
+            }, {
+                onConflict: 'session_id, student_id'
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data;
     }
 };
 
@@ -614,6 +650,43 @@ export const usersDB = {
 
         if (error) throw error;
         return { changes: 1 };
+    },
+
+    // Xoa lop khoi danh sach assignedClasses cua tat ca users
+    removeAssignedClass: async (classId) => {
+        // Can not query JSON arrays easily with basic Postgrest filter if array contains simple values
+        // We will fetch relevant users and update them
+        // Assuming small user base
+        const { data: users, error } = await supabase
+            .from('users')
+            .select('*');
+
+        if (error) throw error;
+
+        // Filter users who have this class
+        // classId comes as string from params usually, but stored as number/string in JSON?
+        // Let's handle both just in case
+        const targetId = parseInt(classId);
+
+        const usersToUpdate = users.filter(u =>
+            u.assigned_classes &&
+            Array.isArray(u.assigned_classes) &&
+            (u.assigned_classes.includes(targetId) || u.assigned_classes.includes(String(targetId)))
+        );
+
+        if (usersToUpdate.length === 0) return { updated: 0 };
+
+        // Process updates in parallel
+        const updates = usersToUpdate.map(async (u) => {
+            const newClasses = u.assigned_classes.filter(id => id != targetId); // Loose equality to catch string/int mismatch
+            return supabase
+                .from('users')
+                .update({ assigned_classes: newClasses })
+                .eq('id', u.id);
+        });
+
+        await Promise.all(updates);
+        return { updated: updates.length };
     }
 };
 
@@ -819,6 +892,17 @@ export const syncErrorsDB = {
             .from('sync_error_logs')
             .delete()
             .eq('id', id);
+
+        if (error) throw error;
+        return { success: true };
+    },
+
+    // Xoa log theo lop (khi xoa lop)
+    deleteByClassId: async (classId) => {
+        const { error } = await supabase
+            .from('sync_error_logs')
+            .delete()
+            .eq('class_id', classId);
 
         if (error) throw error;
         return { success: true };
